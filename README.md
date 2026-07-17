@@ -1,5 +1,7 @@
 # Ranger Security Intelligence
 
+![Centro de operaciones Ranger Intelligence con los agentes topo](./topo_ranger.PNG)
+
 Plataforma de observabilidad y gobierno para Apache Ranger, preparada para desplegarse como aplicación en Cloudera AI Workbench. Combina una visión ejecutiva de KPIs, trazabilidad de accesos, geolocalización y consultas en lenguaje natural sobre un perímetro estrictamente de solo lectura.
 
 > Estado: MVP funcional. No modifica políticas de Ranger. Las credenciales permanecen en FastAPI y nunca llegan al navegador ni al modelo.
