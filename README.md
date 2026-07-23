@@ -4,7 +4,9 @@
 
 Plataforma de observabilidad y gobierno para Apache Ranger, preparada para desplegarse como aplicación en Cloudera AI Workbench. Combina una visión ejecutiva de KPIs, trazabilidad de accesos, geolocalización y consultas en lenguaje natural sobre un perímetro estrictamente de solo lectura.
 
-> Estado: MVP funcional. No modifica políticas de Ranger. Las credenciales permanecen en FastAPI y nunca llegan al navegador ni al modelo.
+> Estado: MVP funcional validado contra Solr Kerberizado el 23 de julio de
+> 2026. No modifica políticas de Ranger. Las credenciales permanecen en
+> FastAPI y nunca llegan al navegador ni al modelo.
 
 La aplicación incorpora autenticación local mediante contraseña scrypt y sesión firmada en cookie `HttpOnly`. Todo el acceso web se sirve por HTTPS; en desarrollo se utiliza un certificado autofirmado.
 
@@ -23,7 +25,8 @@ El producto no sustituye a Ranger. Actúa como una capa de lectura, interpretaci
 ```mermaid
 flowchart LR
     P["Plugins Ranger<br/>HDFS · Hive · Atlas · Knox"] -->|"eventos de auditoría"| S["Solr ranger_audits<br/>fuente de evidencia"]
-    S -->|"HTTPS + Kerberos/SPNEGO<br/>fq=-reqUser:(...)"| A["FastAPI<br/>frontera de confianza"]
+    KD["KDC · base1<br/>MOLE4.LOCAL"] -->|"TGT Kerberos"| A["FastAPI<br/>frontera de confianza"]
+    S -->|"HTTPS + SPNEGO<br/>fq=-reqUser:(...)"| A
     R["Ranger Admin"] -->|"GET policy"| A
     A --> F["Filtro compensatorio<br/>usuarios técnicos"]
     F --> C["Caché 120 s<br/>periodo + muestra + filtro"]
@@ -97,7 +100,7 @@ Ejemplos:
 
 ### Alcance y denominadores
 
-Toda métrica se calcula sobre una **muestra explícita**, no necesariamente sobre el universo histórico. El pie de la web muestra el tamaño solicitado y la respuesta API incluye `sampleSize`. Aumentar la muestra mejora cobertura pero incrementa el coste sobre Ranger.
+Toda métrica se calcula sobre una **muestra explícita**, no necesariamente sobre el universo histórico. El pie de la web muestra el tamaño solicitado y la respuesta API incluye `sampleSize`. Aumentar la muestra mejora cobertura, pero incrementa el coste de consulta y transferencia desde Solr.
 
 ## 5. Arquitectura
 
@@ -127,6 +130,10 @@ flowchart TB
         XA["/solr/ranger_audits/select"]
     end
 
+    subgraph Kerberos["Kerberos · base1"]
+        KDC["KDC MOLE4.LOCAL"]
+    end
+
     subgraph Ranger["Apache Ranger Admin · base3"]
         PO["/service/public/v2/api/policy"]
     end
@@ -137,7 +144,8 @@ flowchart TB
     end
 
     UI <-->|"HTTPS / JSON"| API
-    API -->|"kinit + SPNEGO · GET"| XA
+    API -->|"kinit · TGT"| KDC
+    API -->|"SPNEGO · GET"| XA
     API -->|"Basic Auth · GET"| PO
     GATEWAY -->|"API compatible con OpenAI"| TOPITO
     GATEWAY -->|"API compatible con OpenAI"| QWEN
@@ -148,7 +156,7 @@ flowchart TB
 
 - **Backend for Frontend:** React solo llama a FastAPI; no conoce credenciales Ranger.
 - **Solo lectura por construcción:** el cliente únicamente implementa GET de auditorías y políticas.
-- **Defensa en profundidad:** `excludeUser` se envía a Ranger y vuelve a comprobarse en FastAPI.
+- **Defensa en profundidad:** el filtro negativo `fq=-reqUser:(...)` se ejecuta en Solr y vuelve a comprobarse en FastAPI.
 - **Cálculos puros:** `analytics.py` no hace red, facilitando revisión y pruebas.
 - **Despliegue único:** React se compila y FastAPI sirve el resultado.
 - **MCP cerrado:** las tools exponen casos de gobierno concretos, no un proxy HTTP genérico.
@@ -252,6 +260,7 @@ Artefactos no versionados:
 - `data/geolocation.sqlite`: índice derivado.
 - `data/chat_audit.jsonl`: evidencia operativa.
 - `data/krb5cc_ranger_solr`: credential cache Kerberos temporal.
+- `data/krb5_ranger_solr.conf`: configuración Kerberos privada generada por la aplicación.
 - `geolocationDatabaseIPv4.csv`: fuente geográfica de gran tamaño.
 
 ## 9. Configuración
@@ -318,6 +327,17 @@ kinit -c data/krb5cc_ranger_solr smerchan@MOLE4.LOCAL
 
 La contraseña se entrega por entrada estándar desde `KERBEROS_PASSWORD`; no forma parte del comando ni se registra. `curl --negotiate -u :` reutiliza ese cache para SPNEGO. En producción es preferible sustituir la contraseña por un keytab limitado y un principal de servicio dedicado.
 
+El flujo de autenticación y consulta es:
+
+1. FastAPI genera el `krb5.conf` privado sin modificar `/etc/krb5.conf`.
+2. `klist` comprueba el cache dedicado.
+3. Si no existe un TGT válido, `kinit` autentica
+   `smerchan@MOLE4.LOCAL` contra `base1.mole4.local`.
+4. `curl --negotiate` presenta el ticket al servicio HTTP de Solr en
+   `base2.mole4.local:8995`.
+5. Solr devuelve JSON y el adaptador traduce `reqUser`, `repo`, `cliIP`,
+   `evtTime` y `result` al contrato interno del dashboard.
+
 La lista `RANGER_EXCLUDE_USERS` se convierte en un filtro Solr como:
 
 ```text
@@ -325,6 +345,31 @@ fq=-reqUser:(hdfs OR hive OR impala OR kafka OR nifi OR spark OR yarn OR hue)
 ```
 
 FastAPI repite la exclusión después de normalizar la respuesta como control compensatorio.
+
+#### Diagnóstico Kerberos
+
+Los errores más habituales y su significado son:
+
+| Error | Causa probable | Comprobación |
+|---|---|---|
+| `Configuration file does not specify default realm` | El proceso no recibió `KRB5_CONFIG` | Comprobar `KERBEROS_CONFIG_FILE` y reiniciar |
+| `Cannot find KDC for realm` | KDC ausente o incorrecto | Debe ser `base1.mole4.local`, no el servidor Solr |
+| `Password incorrect` | Credencial Kerberos incorrecta o caducada | Actualizar `KERBEROS_PASSWORD` solo en `.env` |
+| `curl: (67) Login denied` | No hay TGT válido o SPNEGO no está disponible | Revisar `klist` y que `curl --version` incluya SPNEGO |
+| Timeout al consultar | DNS, red o puerto inaccesible | Verificar acceso a `base1` y `base2:8995` |
+
+Para comprobar manualmente el mismo contexto que usa la aplicación:
+
+```bash
+export KRB5_CONFIG="$PWD/data/krb5_ranger_solr.conf"
+export KRB5CCNAME="FILE:$PWD/data/krb5cc_ranger_solr"
+klist
+curl -k --negotiate -u : \
+  "https://base2.mole4.local:8995/solr/ranger_audits/select?q=*:*&rows=1&wt=json"
+```
+
+Nunca se debe copiar el cache Kerberos, la contraseña o el contenido de `.env`
+a Git, capturas de pantalla o registros de soporte.
 
 ### Línea base y rollback
 
@@ -341,7 +386,8 @@ Requisitos:
 - Python 3.11 o superior.
 - Node.js 20 o superior para compilar React.
 - Cliente MIT Kerberos (`kinit`, `klist`) y `curl` compilado con SPNEGO.
-- Conectividad con Solr `base2:8995`, el KDC y Ranger Admin.
+- Resolución DNS y conectividad con el KDC `base1.mole4.local`, Solr
+  `base2.mole4.local:8995` y Ranger Admin `base3.mole4.local:6182`.
 
 ```bash
 git clone http://nas.mole4.local:8418/smerchan/topo-ranger-kpi-agent.git
@@ -503,7 +549,7 @@ Cobertura funcional actual:
 - servicio como parte de la identidad del recurso;
 - interpretación natural de desglose por usuario;
 - respuesta MCP/API exclusivamente de lectura;
-- envío de `excludeUser`;
+- construcción del filtro Solr negativo para usuarios internos;
 - paginación de auditorías;
 - periodos de 3 y 6 meses;
 - límite máximo de muestra;
@@ -518,7 +564,15 @@ Cobertura funcional actual:
 - normalización `reqUser/repo/resource/cliIP/evtTime/result` al contrato interno;
 - ordenación y paginación Solr.
 
-La prueba de integración debe ejecutarse en una red que resuelva `base2.mole4.local`, alcance el KDC y disponga de credenciales Kerberos. Para evitar carga accidental, se recomienda comenzar con `rows=10`.
+La integración real se validó el 23 de julio de 2026 desde el entorno de
+desarrollo: se obtuvo un TGT contra `base1.mole4.local`, Solr respondió con
+`connected=true`, `zkConnected=true` y un universo de 726.785 auditorías en
+ese instante. La cifra es dinámica y solo certifica conectividad y lectura,
+no debe utilizarse como KPI funcional.
+
+Para repetir la prueba en otro entorno, la red debe resolver
+`base1.mole4.local` y `base2.mole4.local`, alcanzar el KDC y disponer de
+credenciales Kerberos. Para evitar carga accidental, comenzar con `rows=10`.
 
 ## 13. Trazabilidad y seguridad
 
