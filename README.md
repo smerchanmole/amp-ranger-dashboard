@@ -274,7 +274,7 @@ SOLR_COLLECTION=ranger_audits
 SOLR_VERIFY_SSL=false
 SOLR_TIMEOUT_SECONDS=90
 KERBEROS_USER=smerchan
-KERBEROS_REALM=MOLE4.LOCAL
+KERBEROS_REALM=
 KERBEROS_PASSWORD=replace-with-kerberos-password
 KERBEROS_CCACHE=data/krb5cc_ranger_solr
 AUDIT_LOG_PATH=data/chat_audit.jsonl
@@ -304,7 +304,7 @@ En producción debe utilizarse un gestor de secretos. `RANGER_VERIFY_SSL=false` 
 Al arrancar la primera consulta, el backend comprueba su credential cache con `klist`. Si no existe un TGT válido ejecuta:
 
 ```bash
-kinit -c data/krb5cc_ranger_solr smerchan@MOLE4.LOCAL
+kinit -c data/krb5cc_ranger_solr smerchan
 ```
 
 La contraseña se entrega por entrada estándar desde `KERBEROS_PASSWORD`; no forma parte del comando ni se registra. `curl --negotiate -u :` reutiliza ese cache para SPNEGO. En producción es preferible sustituir la contraseña por un keytab limitado y un principal de servicio dedicado.

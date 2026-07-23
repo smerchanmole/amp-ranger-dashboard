@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     solr_verify_ssl: bool = False
     solr_timeout_seconds: int = 90
     kerberos_user: str = "smerchan"
-    kerberos_realm: str = "MOLE4.LOCAL"
+    kerberos_realm: str = ""
     kerberos_password: str = ""
     kerberos_ccache: Path = Path("data/krb5cc_ranger_solr")
     audit_log_path: Path = Path("data/chat_audit.jsonl")
@@ -62,7 +62,12 @@ class Settings(BaseSettings):
 
     @property
     def kerberos_principal(self) -> str:
-        return f"{self.kerberos_user}@{self.kerberos_realm}"
+        # El cliente Kerberos del sistema suele conocer su realm predeterminado.
+        # En ese caso debemos reproducir exactamente `kinit usuario`. Solo se
+        # añade `@REALM` cuando el despliegue lo configura expresamente.
+        if self.kerberos_realm.strip():
+            return f"{self.kerberos_user}@{self.kerberos_realm.strip()}"
+        return self.kerberos_user
 
     @property
     def solr_select_url(self) -> str:

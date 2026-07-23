@@ -13,7 +13,7 @@ def completed(command, returncode=0, stdout="", stderr=""):
 def test_kerberos_uses_dedicated_cache_and_password_via_stdin(tmp_path):
     calls = []
     settings = Settings(
-        kerberos_user="smerchan", kerberos_realm="MOLE4.LOCAL",
+        kerberos_user="smerchan", kerberos_realm="",
         kerberos_password="kerberos-test-password",
         kerberos_ccache=tmp_path / "krb5cc",
     )
@@ -24,9 +24,17 @@ def test_kerberos_uses_dedicated_cache_and_password_via_stdin(tmp_path):
 
     KerberosTicket(settings, runner).ensure()
     kinit_command, kinit_kwargs = calls[1]
-    assert kinit_command == ["kinit", "-c", str((tmp_path / "krb5cc").resolve()), "smerchan@MOLE4.LOCAL"]
+    assert kinit_command == ["kinit", "-c", str((tmp_path / "krb5cc").resolve()), "smerchan"]
     assert kinit_kwargs["input"] == "kerberos-test-password\n"
     assert kinit_kwargs["env"]["KRB5CCNAME"].startswith("FILE:")
+
+
+def test_kerberos_principal_only_adds_realm_when_configured():
+    assert Settings(kerberos_user="smerchan", kerberos_realm="").kerberos_principal == "smerchan"
+    assert (
+        Settings(kerberos_user="smerchan", kerberos_realm="MOLE4.LOCAL").kerberos_principal
+        == "smerchan@MOLE4.LOCAL"
+    )
 
 
 def test_solr_filters_users_dates_and_normalizes_response(monkeypatch, tmp_path):
