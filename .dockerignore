@@ -8,3 +8,4 @@ data
 geolocationDatabaseIPv4.csv
 __pycache__
 *.pyc
+certs

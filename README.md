@@ -6,6 +6,8 @@ Plataforma de observabilidad y gobierno para Apache Ranger, preparada para despl
 
 > Estado: MVP funcional. No modifica políticas de Ranger. Las credenciales permanecen en FastAPI y nunca llegan al navegador ni al modelo.
 
+La aplicación incorpora autenticación local mediante contraseña scrypt y sesión firmada en cookie `HttpOnly`. Todo el acceso web se sirve por HTTPS; en desarrollo se utiliza un certificado autofirmado.
+
 ## 1. Propósito de gobierno
 
 Apache Ranger conserva la evidencia operativa: quién accedió, a qué activo, desde dónde, mediante qué servicio y con qué decisión. Este proyecto convierte esa evidencia técnica en tres vistas complementarias:
@@ -27,9 +29,10 @@ flowchart LR
     F --> C["Caché 120 s<br/>periodo + muestra + filtro"]
     C --> K["Motor KPI<br/>métricas explicables"]
     C --> N["Motor semántico<br/>intenciones permitidas"]
+    N --> G["AI Gateway / LiteLLM<br/>topito · qwen-local"]
     C --> M["MCP Ranger<br/>tools de solo lectura"]
     K --> W["Dashboard React"]
-    N --> W
+    G --> W
     W --> U["Responsable de gobierno<br/>o seguridad"]
     N --> L["Bitácora JSONL"]
     M --> X["Agente LLM autorizado"]
@@ -108,11 +111,13 @@ flowchart TB
         API["FastAPI /api"]
         GOV["Analytics de gobierno"]
         CHAT["Intérprete seguro"]
+        GATEWAY["Cliente AI Gateway"]
         GEO["Índice SQLite IPv4"]
         AUDIT["Bitácora JSONL"]
         MCPS["FastMCP server"]
         API --> GOV
         API --> CHAT
+        CHAT --> GATEWAY
         API --> GEO
         CHAT --> AUDIT
         MCPS --> GOV
@@ -123,9 +128,16 @@ flowchart TB
         PO["/service/public/v2/api/policy"]
     end
 
+    subgraph AI["AI Gateway / LiteLLM"]
+        TOPITO["topito → OpenAI"]
+        QWEN["qwen-local → Ollama qwen3.5:9b"]
+    end
+
     UI <-->|"HTTPS / JSON"| API
     API -->|"Basic Auth · GET"| XA
     API -->|"Basic Auth · GET"| PO
+    GATEWAY -->|"API compatible con OpenAI"| TOPITO
+    GATEWAY -->|"API compatible con OpenAI"| QWEN
     AGENT["Cliente MCP / LLM"] <-->|"stdio o Streamable HTTP"| MCPS
 ```
 
@@ -185,6 +197,10 @@ Parámetros de auditoría relevantes:
 
 | Método | Ruta | Función |
 |---|---|---|
+| POST | `/api/auth/login` | Valida credenciales y crea la cookie segura |
+| GET | `/api/auth/session` | Comprueba la sesión activa |
+| POST | `/api/auth/logout` | Elimina la cookie de sesión |
+| GET | `/api/config` | Aliases LLM seleccionables publicados por AI Gateway |
 | GET | `/api/health` | Conectividad, servicios y estado geográfico |
 | GET | `/api/dashboard` | KPIs y tablas gobernadas |
 | GET | `/api/map` | Puntos geográficos agregados |
@@ -203,6 +219,7 @@ topo-ranger-kpi-agent/
 │   ├── chat.py            # contexto e intenciones de lenguaje natural
 │   ├── config.py          # configuración externalizada
 │   ├── geolocation.py     # índice y resolución IPv4
+│   ├── llm.py             # adaptador único a AI Gateway/LiteLLM
 │   ├── main.py            # FastAPI, caché y entrega del frontend
 │   ├── mcp_server.py      # tools MCP de solo lectura
 │   └── ranger.py          # frontera HTTP con Ranger Admin
@@ -217,6 +234,7 @@ topo-ranger-kpi-agent/
 ├── Dockerfile             # build multi-stage Node → Python
 ├── start.py               # arranque local/Cloudera
 ├── requirements.txt
+├── litellm-config.yaml.example # catálogo de modelos del gateway
 └── .env.example
 ```
 
@@ -243,7 +261,21 @@ RANGER_EXCLUDE_USERS=hdfs,hive,impala,kafka,nifi,spark
 AUDIT_LOG_PATH=data/chat_audit.jsonl
 GEO_CSV_PATH=geolocationDatabaseIPv4.csv
 GEO_DB_PATH=data/geolocation.sqlite
-CORS_ORIGINS=http://localhost:5173
+CORS_ORIGINS=https://localhost:5173
+APP_AUTH_USERNAME=smerchan
+APP_AUTH_PASSWORD_HASH=scrypt$16384$8$1$replace-salt$replace-hash
+APP_SESSION_SECRET=replace-with-a-long-random-secret
+APP_SESSION_HOURS=8
+APP_COOKIE_NAME=ranger_session
+APP_COOKIE_SECURE=true
+SSL_CERTFILE=certs/localhost.crt
+SSL_KEYFILE=certs/localhost.key
+SERVER_IP=192.168.1.98
+AI_GATEWAY_API_URL=http://127.0.0.1:4000/v1
+AI_GATEWAY_TOKEN=replace-with-litellm-master-key
+AI_GATEWAY_MODELS=topito,qwen-local
+AI_GATEWAY_DEFAULT_MODEL=topito
+AI_GATEWAY_TIMEOUT_SECONDS=90
 ```
 
 En producción debe utilizarse un gestor de secretos. `RANGER_VERIFY_SSL=false` solo es aceptable en laboratorio con certificado interno no confiable; el objetivo productivo debe ser `true` con la CA corporativa instalada.
@@ -267,6 +299,68 @@ cp .env.example .env
 
 Editar `.env` y añadir las credenciales mediante un canal seguro.
 
+### Configurar o cambiar la contraseña
+
+La contraseña distingue mayúsculas y minúsculas. FastAPI no guarda una contraseña en claro: valida el valor de `APP_AUTH_PASSWORD_HASH`.
+
+Para generar un hash sin escribir la contraseña en el historial:
+
+```bash
+python -m scripts.hash_password
+```
+
+El script solicita la contraseña dos veces y devuelve una línea que comienza por `scrypt$`. Copiarla completa a `.env`:
+
+```env
+APP_AUTH_PASSWORD_HASH=scrypt$16384$8$1$...
+```
+
+Reiniciar `python start.py` para cargar el hash nuevo.
+
+Las cookies creadas anteriormente continúan siendo válidas hasta su caducidad. Para cerrar todas las sesiones activas, generar además un secreto nuevo:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
+Copiarlo a:
+
+```env
+APP_SESSION_SECRET=valor-generado
+```
+
+No debe guardarse la contraseña en claro en `.env`, Git, README o logs.
+
+Generar el certificado HTTPS autofirmado:
+
+```bash
+python -m scripts.generate_self_signed_cert
+```
+
+El navegador mostrará una advertencia la primera vez porque el certificado no procede de una CA pública. En producción debe reemplazarse por un certificado corporativo o terminar TLS en el proxy de Cloudera.
+
+Si cambia `SERVER_IP`, hay que regenerar el certificado para incluir la nueva IP en su SAN.
+
+### AI Gateway / LiteLLM
+
+La aplicación no contiene clientes directos de OpenAI u Ollama. Siempre llama al endpoint compatible con OpenAI de LiteLLM definido en `AI_GATEWAY_API_URL`. El token permanece en FastAPI y los únicos modelos visibles son los aliases de `AI_GATEWAY_MODELS`.
+
+El fichero [litellm-config.yaml.example](./litellm-config.yaml.example) debe copiarse a la carpeta de configuración del gateway. Publica:
+
+- `topito` → modelo OpenAI principal;
+- `qwen-local` → `ollama/qwen3.5:9b`;
+- `embedding-local` → embeddings BGE-M3 para Milvus;
+- `guardian-seguridad` → Llama Guard.
+
+Arranque orientativo del modelo local y el gateway:
+
+```bash
+ollama run qwen3.5:9b
+litellm --config /ruta/del/gateway/litellm-config.yaml --port 4000
+```
+
+La web obtiene el catálogo desde `/api/config` y permite seleccionar `topito` o `qwen-local`. Tablas y gráficas siguen calculándose de forma determinista; el LLM únicamente redacta la explicación sobre esa evidencia.
+
 ### Índice geográfico
 
 ```bash
@@ -277,13 +371,16 @@ El CSV contiene aproximadamente 2,4 millones de rangos. Se transforma una vez a 
 
 ## 11. Ejecución
 
-### Desarrollo
+### Desarrollo HTTPS
 
 Terminal 1:
 
 ```bash
 source .venv/bin/activate
-python -m uvicorn backend.main:app --reload
+python -m uvicorn backend.main:app --reload \
+  --host 192.168.1.98 --port 8000 \
+  --ssl-certfile certs/localhost.crt \
+  --ssl-keyfile certs/localhost.key
 ```
 
 Terminal 2:
@@ -294,7 +391,7 @@ npm install
 npm run dev
 ```
 
-Abrir `http://localhost:5173`.
+Abrir `https://192.168.1.98:5173`. La primera visita requiere aceptar el certificado autofirmado.
 
 ### Producción local
 
@@ -306,7 +403,7 @@ cd ..
 python start.py
 ```
 
-Abrir `http://localhost:8000`.
+Abrir `https://192.168.1.98:8000`.
 
 ### Docker
 
@@ -356,6 +453,11 @@ Cobertura funcional actual:
 - periodos de 3 y 6 meses;
 - límite máximo de muestra;
 - agrupación de IP privadas en Embajadores 181.
+- hash scrypt y rechazo de credenciales incorrectas;
+- cookie `HttpOnly`, `Secure`, `SameSite=Strict`, logout y rechazo de sesiones manipuladas;
+- protección de APIs, Swagger y OpenAPI sin cookie;
+- catálogo LLM limitado a aliases publicados en `.env`;
+- llamada compatible con OpenAI a AI Gateway y rechazo de modelos no permitidos.
 
 La prueba de integración con Ranger debe ejecutarse en una red que resuelva `base3.mole4.local`. Para evitar carga accidental, se recomienda comenzar con `pageSize=2` y aumentar progresivamente.
 
@@ -364,6 +466,10 @@ La prueba de integración con Ranger debe ejecutarse en una red que resuelva `ba
 ### Controles implementados
 
 - Credenciales confinadas al backend.
+- Contraseña de acceso almacenada como hash scrypt; nunca en texto claro.
+- Cookie firmada `HttpOnly`, `Secure` y `SameSite=Strict`, con caducidad configurable.
+- APIs, Swagger y OpenAPI protegidos por sesión.
+- Límite de cinco fallos de acceso por IP durante cinco minutos.
 - Cliente Ranger con superficie GET cerrada.
 - Muestra limitada a 100.000 eventos.
 - Paginación en bloques de 10.000.
@@ -381,7 +487,8 @@ La prueba de integración con Ranger debe ejecutarse en una red que resuelva `ba
 - Las IP privadas se representan mediante una ubicación organizativa acordada, no su posición física real.
 - La muestra puede no contener todos los eventos del periodo.
 - La caché es local al proceso; un despliegue con múltiples réplicas debería usar un almacén compartido.
-- El intérprete actual es determinista. Un LLM futuro debe consumir únicamente las tools MCP y conservar los mismos límites.
+- Tablas y gráficas son deterministas; el LLM solo redacta sobre esa evidencia. Si AI Gateway falla, se conserva la respuesta local y se identifica el fallback.
+- El selector muestra aliases del gateway, no proveedores directos. `embedding-local` y `guardian-seguridad` no se ofrecen como modelos generales de chat.
 
 ## 14. Evolución recomendada
 

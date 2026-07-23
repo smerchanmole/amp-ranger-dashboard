@@ -22,6 +22,20 @@ class Settings(BaseSettings):
     geo_csv_path: Path = Path("geolocationDatabaseIPv4.csv")
     geo_db_path: Path = Path("data/geolocation.sqlite")
     cors_origins: str = "http://localhost:5173"
+    app_auth_username: str = "smerchan"
+    app_auth_password_hash: str = ""
+    app_session_secret: str = ""
+    app_session_hours: int = 8
+    app_cookie_name: str = "ranger_session"
+    app_cookie_secure: bool = True
+    ssl_certfile: Path = Path("certs/localhost.crt")
+    ssl_keyfile: Path = Path("certs/localhost.key")
+    server_ip: str = "192.168.1.98"
+    ai_gateway_api_url: str = "http://127.0.0.1:4000/v1"
+    ai_gateway_token: str = ""
+    ai_gateway_models: str = "topito,qwen-local"
+    ai_gateway_default_model: str = "topito"
+    ai_gateway_timeout_seconds: int = 90
 
     @property
     def services(self) -> list[str]:
@@ -30,6 +44,11 @@ class Settings(BaseSettings):
     @property
     def excluded_users(self) -> list[str]:
         return [item.strip() for item in self.ranger_exclude_users.split(",") if item.strip()]
+
+    @property
+    def gateway_models(self) -> list[str]:
+        """Aliases publicados por LiteLLM; nunca nombres directos de proveedor."""
+        return [item.strip() for item in self.ai_gateway_models.split(",") if item.strip()]
 
 
 @lru_cache

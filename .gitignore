@@ -8,3 +8,5 @@ frontend/dist/
 data/*.jsonl
 data/*.sqlite*
 geolocationDatabaseIPv4.csv
+certs/*.crt
+certs/*.key

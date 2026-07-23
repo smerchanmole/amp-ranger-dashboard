@@ -18,4 +18,4 @@ COPY scripts/ scripts/
 COPY --from=frontend-build /app/frontend/dist frontend/dist/
 RUN mkdir -p data
 EXPOSE 8000
-CMD ["sh", "-c", "python -m uvicorn backend.main:app --host 0.0.0.0 --port ${CDSW_APP_PORT:-${APP_PORT}}"]
+CMD ["sh", "-c", "test -f certs/localhost.crt || python -m scripts.generate_self_signed_cert; python start.py"]
