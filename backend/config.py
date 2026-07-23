@@ -18,6 +18,16 @@ class Settings(BaseSettings):
     ranger_audit_page_size: int = 5000
     ranger_timeout_seconds: int = 60
     ranger_exclude_users: str = "hdfs,hive,impala,kafka,nifi,spark"
+    audit_source: str = "solr"
+    solr_server: str = "base2.mole4.local"
+    solr_port: int = 8995
+    solr_collection: str = "ranger_audits"
+    solr_verify_ssl: bool = False
+    solr_timeout_seconds: int = 90
+    kerberos_user: str = "smerchan"
+    kerberos_realm: str = "MOLE4.LOCAL"
+    kerberos_password: str = ""
+    kerberos_ccache: Path = Path("data/krb5cc_ranger_solr")
     audit_log_path: Path = Path("data/chat_audit.jsonl")
     geo_csv_path: Path = Path("geolocationDatabaseIPv4.csv")
     geo_db_path: Path = Path("data/geolocation.sqlite")
@@ -49,6 +59,14 @@ class Settings(BaseSettings):
     def gateway_models(self) -> list[str]:
         """Aliases publicados por LiteLLM; nunca nombres directos de proveedor."""
         return [item.strip() for item in self.ai_gateway_models.split(",") if item.strip()]
+
+    @property
+    def kerberos_principal(self) -> str:
+        return f"{self.kerberos_user}@{self.kerberos_realm}"
+
+    @property
+    def solr_select_url(self) -> str:
+        return f"https://{self.solr_server}:{self.solr_port}/solr/{self.solr_collection}/select"
 
 
 @lru_cache

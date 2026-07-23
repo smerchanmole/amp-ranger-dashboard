@@ -7,6 +7,7 @@ node_modules/
 frontend/dist/
 data/*.jsonl
 data/*.sqlite*
+data/krb5cc*
 geolocationDatabaseIPv4.csv
 certs/*.crt
 certs/*.key

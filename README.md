@@ -22,9 +22,9 @@ El producto no sustituye a Ranger. Actúa como una capa de lectura, interpretaci
 
 ```mermaid
 flowchart LR
-    P["Plugins Ranger<br/>HDFS · Hive · Atlas · Knox"] -->|"eventos de auditoría"| R["Ranger Admin<br/>fuente de evidencia"]
-    R -->|"GET access_audit<br/>paginación + excludeUser"| A["FastAPI<br/>frontera de confianza"]
-    R -->|"GET policy"| A
+    P["Plugins Ranger<br/>HDFS · Hive · Atlas · Knox"] -->|"eventos de auditoría"| S["Solr ranger_audits<br/>fuente de evidencia"]
+    S -->|"HTTPS + Kerberos/SPNEGO<br/>fq=-reqUser:(...)"| A["FastAPI<br/>frontera de confianza"]
+    R["Ranger Admin"] -->|"GET policy"| A
     A --> F["Filtro compensatorio<br/>usuarios técnicos"]
     F --> C["Caché 120 s<br/>periodo + muestra + filtro"]
     C --> K["Motor KPI<br/>métricas explicables"]
@@ -123,8 +123,11 @@ flowchart TB
         MCPS --> GOV
     end
 
-    subgraph Ranger["Apache Ranger Admin"]
-        XA["/service/xaudit/access_audit"]
+    subgraph Solr["Solr Kerberizado · base2"]
+        XA["/solr/ranger_audits/select"]
+    end
+
+    subgraph Ranger["Apache Ranger Admin · base3"]
         PO["/service/public/v2/api/policy"]
     end
 
@@ -134,7 +137,7 @@ flowchart TB
     end
 
     UI <-->|"HTTPS / JSON"| API
-    API -->|"Basic Auth · GET"| XA
+    API -->|"kinit + SPNEGO · GET"| XA
     API -->|"Basic Auth · GET"| PO
     GATEWAY -->|"API compatible con OpenAI"| TOPITO
     GATEWAY -->|"API compatible con OpenAI"| QWEN
@@ -177,21 +180,25 @@ El SDK oficial recomienda Streamable HTTP para producción y `stdio` resulta pr�
 
 ## 7. APIs
 
-### APIs de Ranger utilizadas
+### Fuentes de gobierno utilizadas
 
 ```text
-GET /service/xaudit/access_audit
+GET https://base2.mole4.local:8995/solr/ranger_audits/select
 GET /service/public/v2/api/policy
 ```
 
-Parámetros de auditoría relevantes:
+La auditoría se obtiene de Solr mediante Kerberos/SPNEGO (`kinit` y `curl --negotiate`). Las políticas continúan leyéndose desde Ranger Admin con Basic Auth.
+
+Parámetros Solr relevantes:
 
 | Parámetro | Uso |
 |---|---|
-| `startDate`, `endDate` | Acotar el periodo |
-| `pageSize`, `startIndex` | Paginar en bloques de hasta 10.000 |
-| `excludeUser` | Excluir cuentas técnicas separadas por comas |
-| `repositoryName` | Filtrar un servicio cuando procede |
+| `q=*:*` | Universo inicial de auditorías |
+| `fq=evtTime:[inicio TO fin]` | Acotar el periodo |
+| `fq=-reqUser:(...)` | Excluir cuentas técnicas en origen |
+| `fq=repo:"servicio"` | Filtrar un repositorio cuando procede |
+| `start`, `rows` | Paginar en bloques de hasta 10.000 |
+| `sort=evtTime desc` | Recuperar primero los eventos recientes |
 
 ### APIs FastAPI
 
@@ -222,7 +229,8 @@ topo-ranger-kpi-agent/
 │   ├── llm.py             # adaptador único a AI Gateway/LiteLLM
 │   ├── main.py            # FastAPI, caché y entrega del frontend
 │   ├── mcp_server.py      # tools MCP de solo lectura
-│   └── ranger.py          # frontera HTTP con Ranger Admin
+│   ├── ranger.py          # políticas desde Ranger Admin
+│   └── solr.py            # auditoría Solr con Kerberos/SPNEGO
 ├── frontend/
 │   ├── src/main.jsx       # dashboard, chat, tablas y mapa
 │   ├── src/styles.css     # sistema visual responsive
@@ -243,6 +251,7 @@ Artefactos no versionados:
 - `.env`: secretos locales.
 - `data/geolocation.sqlite`: índice derivado.
 - `data/chat_audit.jsonl`: evidencia operativa.
+- `data/krb5cc_ranger_solr`: credential cache Kerberos temporal.
 - `geolocationDatabaseIPv4.csv`: fuente geográfica de gran tamaño.
 
 ## 9. Configuración
@@ -258,6 +267,16 @@ RANGER_SERVICES=cm_hdfs,cm_knox,cm_atlas,Hadoop SQL
 RANGER_AUDIT_PAGE_SIZE=5000
 RANGER_TIMEOUT_SECONDS=60
 RANGER_EXCLUDE_USERS=hdfs,hive,impala,kafka,nifi,spark
+AUDIT_SOURCE=solr
+SOLR_SERVER=base2.mole4.local
+SOLR_PORT=8995
+SOLR_COLLECTION=ranger_audits
+SOLR_VERIFY_SSL=false
+SOLR_TIMEOUT_SECONDS=90
+KERBEROS_USER=smerchan
+KERBEROS_REALM=MOLE4.LOCAL
+KERBEROS_PASSWORD=replace-with-kerberos-password
+KERBEROS_CCACHE=data/krb5cc_ranger_solr
 AUDIT_LOG_PATH=data/chat_audit.jsonl
 GEO_CSV_PATH=geolocationDatabaseIPv4.csv
 GEO_DB_PATH=data/geolocation.sqlite
@@ -280,13 +299,40 @@ AI_GATEWAY_TIMEOUT_SECONDS=90
 
 En producción debe utilizarse un gestor de secretos. `RANGER_VERIFY_SSL=false` solo es aceptable en laboratorio con certificado interno no confiable; el objetivo productivo debe ser `true` con la CA corporativa instalada.
 
+### Kerberos y Solr
+
+Al arrancar la primera consulta, el backend comprueba su credential cache con `klist`. Si no existe un TGT válido ejecuta:
+
+```bash
+kinit -c data/krb5cc_ranger_solr smerchan@MOLE4.LOCAL
+```
+
+La contraseña se entrega por entrada estándar desde `KERBEROS_PASSWORD`; no forma parte del comando ni se registra. `curl --negotiate -u :` reutiliza ese cache para SPNEGO. En producción es preferible sustituir la contraseña por un keytab limitado y un principal de servicio dedicado.
+
+La lista `RANGER_EXCLUDE_USERS` se convierte en un filtro Solr como:
+
+```text
+fq=-reqUser:(hdfs OR hive OR impala OR kafka OR nifi OR spark OR yarn OR hue)
+```
+
+FastAPI repite la exclusión después de normalizar la respuesta como control compensatorio.
+
+### Línea base y rollback
+
+La etiqueta Git `baseline-ranger-api-2026-07-23` conserva el último estado que leía auditorías desde `/service/xaudit/access_audit`. Para inspeccionarlo sin modificar la rama actual:
+
+```bash
+git switch --detach baseline-ranger-api-2026-07-23
+```
+
 ## 10. Instalación local
 
 Requisitos:
 
 - Python 3.11 o superior.
 - Node.js 20 o superior para compilar React.
-- Conectividad de red con Ranger Admin.
+- Cliente MIT Kerberos (`kinit`, `klist`) y `curl` compilado con SPNEGO.
+- Conectividad con Solr `base2:8995`, el KDC y Ranger Admin.
 
 ```bash
 git clone http://nas.mole4.local:8418/smerchan/topo-ranger-kpi-agent.git
@@ -458,8 +504,12 @@ Cobertura funcional actual:
 - protección de APIs, Swagger y OpenAPI sin cookie;
 - catálogo LLM limitado a aliases publicados en `.env`;
 - llamada compatible con OpenAI a AI Gateway y rechazo de modelos no permitidos.
+- obtención y reutilización de credential cache Kerberos;
+- construcción del filtro negativo `reqUser` en Solr;
+- normalización `reqUser/repo/resource/cliIP/evtTime/result` al contrato interno;
+- ordenación y paginación Solr.
 
-La prueba de integración con Ranger debe ejecutarse en una red que resuelva `base3.mole4.local`. Para evitar carga accidental, se recomienda comenzar con `pageSize=2` y aumentar progresivamente.
+La prueba de integración debe ejecutarse en una red que resuelva `base2.mole4.local`, alcance el KDC y disponga de credenciales Kerberos. Para evitar carga accidental, se recomienda comenzar con `rows=10`.
 
 ## 13. Trazabilidad y seguridad
 
@@ -470,7 +520,8 @@ La prueba de integración con Ranger debe ejecutarse en una red que resuelva `ba
 - Cookie firmada `HttpOnly`, `Secure` y `SameSite=Strict`, con caducidad configurable.
 - APIs, Swagger y OpenAPI protegidos por sesión.
 - Límite de cinco fallos de acceso por IP durante cinco minutos.
-- Cliente Ranger con superficie GET cerrada.
+- Cliente Solr con superficie GET cerrada, SPNEGO y filtros construidos desde valores validados.
+- Cliente Ranger restringido a lectura de políticas.
 - Muestra limitada a 100.000 eventos.
 - Paginación en bloques de 10.000.
 - Caché por periodo, muestra y filtro de identidad.
@@ -479,6 +530,7 @@ La prueba de integración con Ranger debe ejecutarse en una red que resuelva `ba
 - MCP sin tools de escritura.
 - Auditoría JSONL de pregunta, intención, respuesta, alcance y errores.
 - `.env`, logs, SQLite y CSV excluidos de Git.
+- Credential cache Kerberos excluido de Git.
 
 ### Límites conocidos
 

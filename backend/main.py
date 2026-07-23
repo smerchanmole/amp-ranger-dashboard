@@ -30,9 +30,11 @@ from .config import get_settings
 from .geolocation import GeoDatabase
 from .llm import AIGatewayClient, GatewayError
 from .ranger import RangerClient, RangerError
+from .solr import SolrAuditClient, SolrError
 
 settings = get_settings()
 client = RangerClient(settings)
+audit_client = SolrAuditClient(settings) if settings.audit_source.casefold() == "solr" else client
 log = JsonlAuditLog(settings.audit_log_path)
 geo = GeoDatabase(settings.geo_csv_path, settings.geo_db_path)
 gateway = AIGatewayClient(settings)
@@ -75,7 +77,7 @@ def load(period: str, exclude_internal: bool = True, sample_size: int = 5000):
         if cached and monotonic() - cached[0] < 120:
             return cached[1]
         start, end = dates(period)
-        audits = client.access_audits(start, end, page_size=sample_size, exclude_users=exclude_internal)
+        audits = audit_client.access_audits(start, end, page_size=sample_size, exclude_users=exclude_internal)
         # Algunas versiones aceptan excludeUser pero no lo aplican correctamente
         # con listas. Este filtro local garantiza el comportamiento del selector.
         if exclude_internal:
@@ -127,9 +129,9 @@ def logout(response: Response, username: str = Depends(require_user)):
 @app.get("/api/health")
 def health(username: str = Depends(require_user)):
     try:
-        return {**client.health(), "geoDatabase": geo.available(), "services": settings.services}
-    except RangerError as exc:
-        return {"connected": False, "error": str(exc), "geoDatabase": geo.available(), "services": settings.services}
+        return {**audit_client.health(), "geoDatabase": geo.available(), "services": settings.services}
+    except (RangerError, SolrError) as exc:
+        return {"connected": False, "source": settings.audit_source, "error": str(exc), "geoDatabase": geo.available(), "services": settings.services}
 
 
 @app.get("/api/config")
@@ -137,6 +139,12 @@ def public_runtime_config(username: str = Depends(require_user)):
     """Expone aliases, nunca tokens ni nombres/credenciales de proveedor."""
     return {
         "serverIp": settings.server_ip,
+        "audit": {
+            "source": settings.audit_source,
+            "server": settings.solr_server,
+            "port": settings.solr_port,
+            "collection": settings.solr_collection,
+        },
         "llm": {"models": settings.gateway_models, "defaultModel": settings.ai_gateway_default_model},
     }
 
@@ -146,7 +154,7 @@ def get_dashboard(period: Literal["24h", "7d", "30d", "3m", "6m"] = "7d", exclud
     try:
         audits, policies = load(period, exclude_internal, sample_size)
         return dashboard(audits, policies, settings.services)
-    except RangerError as exc:
+    except (RangerError, SolrError) as exc:
         raise HTTPException(502, str(exc)) from exc
 
 
@@ -156,7 +164,7 @@ def get_map(period: Literal["24h", "7d", "30d", "3m", "6m"] = "7d", exclude_inte
         audits, _ = load(period, exclude_internal, sample_size)
         counts = Counter(str(item.get("clientIP")) for item in audits if item.get("clientIP"))
         return {"points": geo.locate(counts.most_common(200)), "databaseReady": geo.available()}
-    except RangerError as exc:
+    except (RangerError, SolrError) as exc:
         raise HTTPException(502, str(exc)) from exc
 
 
@@ -178,7 +186,7 @@ def chat(request: ChatRequest, username: str = Depends(require_user)):
         result["model"] = model
         log.append({"type": "chat", "username": username, "model": model, "gatewayStatus": gateway_status, "question": request.question, "period": request.period, "excludeInternal": request.exclude_internal, "sampleSize": request.sample_size, "intent": result["intent"], "answer": result["answer"], "resultCount": len(result["data"])})
         return result
-    except RangerError as exc:
+    except (RangerError, SolrError) as exc:
         log.append({"type": "chat_error", "question": request.question, "error": str(exc)})
         raise HTTPException(502, str(exc)) from exc
 
