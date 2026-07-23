@@ -8,6 +8,7 @@ frontend/dist/
 data/*.jsonl
 data/*.sqlite*
 data/krb5cc*
+data/krb5*.conf
 geolocationDatabaseIPv4.csv
 certs/*.crt
 certs/*.key

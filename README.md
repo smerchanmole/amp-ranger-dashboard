@@ -274,9 +274,12 @@ SOLR_COLLECTION=ranger_audits
 SOLR_VERIFY_SSL=false
 SOLR_TIMEOUT_SECONDS=90
 KERBEROS_USER=smerchan
-KERBEROS_REALM=
+KERBEROS_REALM=MOLE4.LOCAL
+KERBEROS_KDC=base1.mole4.local
+KERBEROS_ADMIN_SERVER=base1.mole4.local
 KERBEROS_PASSWORD=replace-with-kerberos-password
 KERBEROS_CCACHE=data/krb5cc_ranger_solr
+KERBEROS_CONFIG_FILE=data/krb5_ranger_solr.conf
 AUDIT_LOG_PATH=data/chat_audit.jsonl
 GEO_CSV_PATH=geolocationDatabaseIPv4.csv
 GEO_DB_PATH=data/geolocation.sqlite
@@ -301,10 +304,16 @@ En producción debe utilizarse un gestor de secretos. `RANGER_VERIFY_SSL=false` 
 
 ### Kerberos y Solr
 
-Al arrancar la primera consulta, el backend comprueba su credential cache con `klist`. Si no existe un TGT válido ejecuta:
+Al arrancar la primera consulta, el backend genera en
+`data/krb5_ranger_solr.conf` una configuración Kerberos privada equivalente a
+la del clúster: realm `MOLE4.LOCAL` y KDC `base1.mole4.local`. Tanto `klist`
+como `kinit` y `curl --negotiate` reciben `KRB5_CONFIG` y `KRB5CCNAME`, por lo
+que no dependen del `/etc/krb5.conf` del portátil. Si no existe un TGT válido
+ejecuta:
 
 ```bash
-kinit -c data/krb5cc_ranger_solr smerchan
+KRB5_CONFIG=data/krb5_ranger_solr.conf \
+kinit -c data/krb5cc_ranger_solr smerchan@MOLE4.LOCAL
 ```
 
 La contraseña se entrega por entrada estándar desde `KERBEROS_PASSWORD`; no forma parte del comando ni se registra. `curl --negotiate -u :` reutiliza ese cache para SPNEGO. En producción es preferible sustituir la contraseña por un keytab limitado y un principal de servicio dedicado.

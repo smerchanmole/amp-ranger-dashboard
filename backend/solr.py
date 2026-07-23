@@ -21,6 +21,7 @@ from .config import Settings
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 SAFE_TERM = re.compile(r"^[A-Za-z0-9_.@-]+$")
+SAFE_KERBEROS_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
 class SolrError(RuntimeError):
@@ -40,10 +41,57 @@ class KerberosTicket:
         return self.settings.kerberos_ccache.resolve()
 
     @property
+    def config_path(self) -> Path:
+        return self.settings.kerberos_config_file.resolve()
+
+    @property
     def environment(self) -> dict[str, str]:
-        return {**os.environ, "KRB5CCNAME": f"FILE:{self.cache_path}"}
+        return {
+            **os.environ,
+            "KRB5CCNAME": f"FILE:{self.cache_path}",
+            "KRB5_CONFIG": str(self.config_path),
+        }
+
+    def _write_config(self) -> None:
+        """Crea una configuración aislada equivalente a la del clúster.
+
+        No modifica `/etc/krb5.conf`, algo importante al ejecutar la app en un
+        portátil o contenedor que también pueda usar otros realms Kerberos.
+        """
+        realm = self.settings.kerberos_realm.strip()
+        kdc = self.settings.kerberos_kdc.strip()
+        admin_server = self.settings.kerberos_admin_server.strip() or kdc
+        if not all(SAFE_KERBEROS_NAME.fullmatch(value) for value in (realm, kdc, admin_server)):
+            raise SolrError("KERBEROS_REALM, KERBEROS_KDC o KERBEROS_ADMIN_SERVER no son válidos")
+        content = f"""[libdefaults]
+ dns_lookup_realm = false
+ dns_lookup_kdc = false
+ ticket_lifetime = 24h
+ forwardable = true
+ default_tgs_enctypes = aes256-cts
+ default_tkt_enctypes = aes256-cts
+ permitted_enctypes = aes256-cts
+ rdns = false
+ udp_preference_limit = 1
+ kdc_timeout = 3000
+ renew_lifetime = 7d
+ default_realm = {realm}
+
+[realms]
+ {realm} = {{
+  kdc = {kdc}
+  admin_server = {admin_server}
+ }}
+
+[domain_realm]
+ .mole4.local = {realm}
+ mole4.local = {realm}
+"""
+        self.config_path.parent.mkdir(parents=True, exist_ok=True)
+        self.config_path.write_text(content, encoding="utf-8")
 
     def _valid(self) -> bool:
+        self._write_config()
         try:
             result = self.runner(
                 ["klist", "-s", "-c", str(self.cache_path)],
