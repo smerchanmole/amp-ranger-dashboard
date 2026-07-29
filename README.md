@@ -10,6 +10,14 @@ Plataforma de observabilidad y gobierno para Apache Ranger, preparada para despl
 
 La aplicación incorpora autenticación local mediante contraseña scrypt y sesión firmada en cookie `HttpOnly`. Todo el acceso web se sirve por HTTPS; en desarrollo se utiliza un certificado autofirmado.
 
+## Vista de la aplicación
+
+![Dashboard Ranger Intelligence con diseño Cristal orgánico](./docs/dashboard-cristal-organico.png)
+
+La captura corresponde a la aplicación real autenticada, con auditorías
+obtenidas desde Solr y una ventana de seis meses. Los datos son dinámicos y la
+imagen solo documenta la composición visual.
+
 ## 1. Propósito de gobierno
 
 Apache Ranger conserva la evidencia operativa: quién accedió, a qué activo, desde dónde, mediante qué servicio y con qué decisión. Este proyecto convierte esa evidencia técnica en tres vistas complementarias:
@@ -271,6 +279,8 @@ topo-ranger-kpi-agent/
 │   └── build_geo_index.py # CSV IPv4 → SQLite indexado
 ├── tests/
 │   └── test_analytics.py  # pruebas unitarias y de contrato
+├── docs/
+│   └── dashboard-cristal-organico.png # captura de la interfaz
 ├── Dockerfile             # build multi-stage Node → Python
 ├── start.py               # arranque local/Cloudera
 ├── requirements.txt
@@ -496,9 +506,49 @@ El CSV contiene aproximadamente 2,4 millones de rangos. Se transforma una vez a 
 
 ## 11. Ejecución
 
-### Desarrollo HTTPS
+### Arranque habitual: un único servidor
 
-Terminal 1:
+```bash
+source .venv/bin/activate
+python start.py
+```
+
+Abrir `https://192.168.1.98:8000`.
+
+Este es el modo normal de uso y despliegue. Se ejecuta un solo servidor web:
+FastAPI publica simultáneamente la API `/api`, Swagger protegido y el bundle
+React compilado. No hay que arrancar Vite ni mantener dos terminales.
+
+La primera visita requiere aceptar el certificado autofirmado. `start.py`
+utiliza `APP_PORT`, o `CDSW_APP_PORT` cuando Cloudera lo proporciona.
+
+### Primera compilación del frontend
+
+Una copia nueva del repositorio no contiene `frontend/dist`, porque es un
+artefacto generado. Hay que crearlo una sola vez tras clonar el proyecto y
+repetirlo únicamente cuando cambie el código React o CSS:
+
+```bash
+cd frontend
+npm ci
+npm run build
+cd ..
+```
+
+Después, el único comando de arranque vuelve a ser:
+
+```bash
+python start.py
+```
+
+El `Dockerfile` ya realiza esta compilación automáticamente durante la
+construcción de la imagen.
+
+### Desarrollo del frontend con recarga en caliente — opcional
+
+Solo quienes estén modificando React o CSS necesitan dos procesos:
+
+Terminal 1, API:
 
 ```bash
 source .venv/bin/activate
@@ -508,27 +558,15 @@ python -m uvicorn backend.main:app --reload \
   --ssl-keyfile certs/localhost.key
 ```
 
-Terminal 2:
+Terminal 2, Vite:
 
 ```bash
 cd frontend
-npm install
 npm run dev
 ```
 
-Abrir `https://192.168.1.98:5173`. La primera visita requiere aceptar el certificado autofirmado.
-
-### Producción local
-
-```bash
-cd frontend
-npm install
-npm run build
-cd ..
-python start.py
-```
-
-Abrir `https://192.168.1.98:8000`.
+Abrir `https://192.168.1.98:5173`. Este modo es una ayuda de desarrollo, no el
+procedimiento de ejecución normal ni el utilizado por Docker.
 
 ### Docker
 
