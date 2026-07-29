@@ -4,9 +4,9 @@
 
 Plataforma de observabilidad y gobierno para Apache Ranger, preparada para desplegarse como aplicación en Cloudera AI Workbench. Combina una visión ejecutiva de KPIs, trazabilidad de accesos, geolocalización y consultas en lenguaje natural sobre un perímetro estrictamente de solo lectura.
 
-> Estado: MVP funcional validado contra Solr Kerberizado el 23 de julio de
-> 2026. No modifica políticas de Ranger. Las credenciales permanecen en
-> FastAPI y nunca llegan al navegador ni al modelo.
+> Estado: MVP funcional, con interfaz “Cristal orgánico” y acceso a Solr
+> Kerberizado validado. No modifica políticas de Ranger. Las credenciales
+> permanecen en FastAPI y nunca llegan al navegador ni al modelo.
 
 La aplicación incorpora autenticación local mediante contraseña scrypt y sesión firmada en cookie `HttpOnly`. Todo el acceso web se sirve por HTTPS; en desarrollo se utiliza un certificado autofirmado.
 
@@ -52,22 +52,45 @@ La separación entre extracción, cálculo y presentación permite demostrar de 
 - Exclusión activable de usuarios internos.
 - KPIs OK/KO para última hora, hoy y muestra.
 - Evolución temporal y distribución permitidos/denegados.
-- Actividad y denegaciones por usuario.
-- Distribución por servicio Ranger.
-- Recursos más utilizados, identificados por **servicio + nombre + base de datos/ruta**.
+- Actividad por identidad mediante ranking proporcional, cuota sobre el total y
+  degradado de intensidad.
+- Identidades con mayor riesgo, priorizadas por volumen relativo de
+  denegaciones.
+- Widgets independientes de recursos por servicio, cada uno con gráfica de
+  toro, total y ranking.
+- Widgets independientes de recursos por usuario. Cada entrada muestra
+  **servicio + recurso + base de datos/ruta**.
+- Categoría `Otros` en los toros para mantener visible el denominador completo
+  aunque el listado solo muestre los recursos principales.
 - IP con más denegaciones.
 - Últimos 100 accesos permitidos y últimos 100 denegados.
 - Inventario y señales básicas de riesgo en políticas.
 - Consulta de la bitácora del chat.
 
-### 3.2 Mapa
+### 3.2 Diseño “Cristal orgánico”
+
+La interfaz adopta un sistema visual claro inspirado en superficies líquidas:
+
+- fondo blanco con ondas, halos acuosos y profundidad suave;
+- paneles translúcidos con refracción contenida y contraste accesible;
+- geometría orgánica aplicada a tarjetas, controles y estados;
+- logo original integrado en una cápsula líquida, sin alterar la ilustración;
+- turquesa y azul para actividad permitida;
+- coral y magenta reservados para denegaciones y riesgo;
+- diseño adaptable: cuatro widgets por fila en escritorio, dos en resoluciones
+  intermedias y uno en móvil.
+
+El color nunca es el único portador de significado: totales, porcentajes,
+posición y etiquetas permanecen visibles.
+
+### 3.3 Mapa
 
 - Las IP públicas se resuelven localmente con un catálogo IPv4 convertido a SQLite.
 - Ninguna IP se envía a un servicio externo de geolocalización.
 - Las IP privadas se agrupan en Calle Embajadores 181, Madrid.
 - El mapa encuadra todos los puntos con aproximadamente 5 km de margen sobre los extremos.
 
-### 3.3 Lenguaje natural
+### 3.4 Lenguaje natural
 
 El chat no convierte texto libre en URLs, SQL ni acciones administrativas. Clasifica la pregunta dentro de un catálogo permitido y responde con:
 
@@ -91,9 +114,10 @@ Ejemplos:
 | Acceso | OK/KO última hora | Pulso operativo y detección temprana |
 | Acceso | OK/KO hoy | Situación diaria para operaciones |
 | Acceso | OK/KO muestra | Postura del periodo seleccionado |
-| Identidad | Accesos por usuario | Concentración de uso y cuentas dominantes |
-| Identidad | Usuarios más denegados | Posible error de asignación, abuso o política incompleta |
-| Activo | Recursos más usados | Activos críticos por evidencia de consumo |
+| Identidad | Actividad por identidad | Ranking, cuota y concentración de uso |
+| Identidad | Identidades con mayor riesgo | Prioridad relativa por denegaciones |
+| Activo | Recursos por servicio | Activos críticos dentro de cada repositorio |
+| Activo | Recursos por usuario | Relación identidad-servicio-activo y concentración de acceso |
 | Servicio | Accesos por repositorio | Distribución de carga y superficie gobernada |
 | Red | IP con denegaciones | Investigación de origen y patrones anómalos |
 | Política | Políticas amplias | Comodines, exposición pública o delegación administrativa |
@@ -107,7 +131,7 @@ Toda métrica se calcula sobre una **muestra explícita**, no necesariamente sob
 ```mermaid
 flowchart TB
     subgraph Browser["Navegador"]
-        UI["React + Recharts + Leaflet"]
+        UI["React · Cristal orgánico<br/>Recharts + Leaflet"]
     end
 
     subgraph App["Aplicación Cloudera AI"]
@@ -547,6 +571,9 @@ Cobertura funcional actual:
 - conteos permitidos/denegados y tasa;
 - ranking y normalización de recursos;
 - servicio como parte de la identidad del recurso;
+- agrupación completa de recursos por servicio;
+- agrupación de recursos por usuario conservando el servicio de cada activo;
+- denominadores completos en los widgets mediante la categoría `Otros`;
 - interpretación natural de desglose por usuario;
 - respuesta MCP/API exclusivamente de lectura;
 - construcción del filtro Solr negativo para usuarios internos;
@@ -563,6 +590,19 @@ Cobertura funcional actual:
 - construcción del filtro negativo `reqUser` en Solr;
 - normalización `reqUser/repo/resource/cliIP/evtTime/result` al contrato interno;
 - ordenación y paginación Solr.
+
+Estado de la suite para esta versión:
+
+```text
+21 passed
+Frontend Vite: build completado
+Revisión visual: 7 días y 6 meses con datos reales
+```
+
+La revisión visual incluye distribuciones desiguales —1.283, 740 y 28 accesos
+por identidad— y un escenario con una única identidad denegada. Esto valida que
+los rankings de intensidad no dependan de disponer de muchas categorías para
+seguir siendo legibles.
 
 La integración real se validó el 23 de julio de 2026 desde el entorno de
 desarrollo: se obtuvo un TGT contra `base1.mole4.local`, Solr respondió con

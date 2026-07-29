@@ -8,7 +8,7 @@ import rangerHero from '../../topo_ranger.PNG';
 import './styles.css';
 
 const API = import.meta.env.VITE_API_URL || '/api';
-const COLORS = ['#22d3b6','#f7b955','#7588ff','#ff6376','#40b9ff','#b48aff'];
+const COLORS = ['#28c7a9','#49a9e8','#78d7d1','#8d7de8','#a9d76e','#f3b35c','#ef7180'];
 
 async function request(path, options) {
   const response = await fetch(`${API}${path}`, {...options, credentials:'include'});
@@ -31,6 +31,52 @@ function Panel({title, subtitle, children, wide=false, full=false}) {
 }
 
 function Empty({children='Sin datos para este periodo'}) { return <div className="empty">{children}</div>; }
+
+function ResourceGallery({title, subtitle, groups=[]}) {
+  return <section className="resource-zone">
+    <header className="section-heading"><div><span className="section-dot"/><h2>{title}</h2></div><p>{subtitle}</p></header>
+    {groups.length ? <div className="resource-widget-grid">{groups.map(group=>
+      <article className="resource-widget" key={group.name}>
+        <header><div className="entity-avatar">{group.name.slice(0,2).toUpperCase()}</div><div><h3>{group.name}</h3><small>{number(group.total)} accesos</small></div></header>
+        <div className="resource-widget-body">
+          <div className="donut-shell">
+            <ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={group.resources} dataKey="value" innerRadius="62%" outerRadius="88%" paddingAngle={2} stroke="rgba(255,255,255,.9)" strokeWidth={2}>{group.resources.map((_,index)=><Cell key={index} fill={COLORS[index%COLORS.length]}/>)}</Pie><Tooltip formatter={(value,name)=>[number(value),name]}/></PieChart></ResponsiveContainer>
+            <div className="donut-total"><strong>{number(group.total)}</strong><span>total</span></div>
+          </div>
+          <ol className="resource-mini-list">{group.resources.map((resource,index)=><li key={`${resource.service}-${resource.raw}-${index}`} title={resource.raw || resource.context}><i style={{background:COLORS[index%COLORS.length]}}/><span><b>{resource.service ? `${resource.service} · ${resource.name}` : resource.name}</b><small>{resource.context}</small></span><strong>{number(resource.value)}</strong></li>)}</ol>
+        </div>
+      </article>
+    )}</div>:<Empty/>}
+  </section>;
+}
+
+function IdentityImpact({items=[], mode='access'}) {
+  if (!items.length) return <Empty/>;
+  const total=items.reduce((sum,item)=>sum+item.value,0);
+  const max=Math.max(...items.map(item=>item.value),1);
+  const isRisk=mode==='risk';
+  const topShare=total ? items[0].value*100/total : 0;
+  const severity=ratio=>ratio>=.75?'Crítica':ratio>=.45?'Alta':ratio>=.2?'Media':'Baja';
+  return <div className={`identity-impact ${isRisk?'risk':''}`}>
+    <div className="identity-summary">
+      <div><span>{isRisk?'Usuarios afectados':'Identidades visibles'}</span><strong>{number(items.length)}</strong></div>
+      <div><span>{isRisk?'Denegaciones representadas':'Accesos representados'}</span><strong>{number(total)}</strong></div>
+      <div><span>Concentración principal</span><strong>{topShare.toFixed(1)}%</strong></div>
+    </div>
+    <div className="identity-list">{items.map((item,index)=>{
+      const ratio=item.value/max;
+      const share=total ? item.value*100/total : 0;
+      const hue=isRisk ? 355-22*ratio : 171+31*ratio;
+      const endHue=isRisk ? 337-10*ratio : 194+18*ratio;
+      return <article className="identity-row" key={item.name} style={{'--strength':`${Math.max(3,ratio*100)}%`,'--bar-start':`hsl(${hue} 76% ${isRisk?65:48}%)`,'--bar-end':`hsl(${endHue} 78% ${isRisk?58:55}%)`}}>
+        <div className="identity-rank">{String(index+1).padStart(2,'0')}</div>
+        <div className="identity-name"><span>{item.name}</span><small>{isRisk?`${severity(ratio)} prioridad relativa`:`${share.toFixed(1)}% de la actividad`}</small></div>
+        <div className="identity-track"><i/><span/></div>
+        <div className="identity-value"><strong>{number(item.value)}</strong><small>{share.toFixed(1)}%</small></div>
+      </article>;
+    })}</div>
+  </div>;
+}
 
 function MapViewport({points}) {
   // Gobierno de localización: el encuadre se deriva de la evidencia y añade
@@ -73,12 +119,12 @@ function Dashboard({data, map}) {
       <Kpi label="KO · Muestra" value={s.denied} sub={`${s.denialRate}% de denegación`} tone="red" icon={AlertTriangle}/>
     </div>
     <div className="grid">
-      <Panel title="Evolución de accesos" subtitle="Permitidos y denegados por día" wide>{data.timeline.length?<ResponsiveContainer width="100%" height={280}><AreaChart data={data.timeline}><CartesianGrid strokeDasharray="3 3" stroke="#30415a"/><XAxis dataKey="date" tick={{fill:'#aab6c8'}}/><YAxis tick={{fill:'#aab6c8'}}/><Tooltip contentStyle={{background:'#111d2e',border:'1px solid #3b4d67',color:'#fff'}}/><Area type="monotone" dataKey="allowed" name="Permitidos" stroke="#22d3b6" strokeWidth={3} fill="#22d3b622"/><Area type="monotone" dataKey="denied" name="Denegados" stroke="#ff6376" strokeWidth={3} fill="#ff637611"/></AreaChart></ResponsiveContainer>:<Empty/>}</Panel>
+      <Panel title="Evolución de accesos" subtitle="Permitidos y denegados por día" wide>{data.timeline.length?<ResponsiveContainer width="100%" height={280}><AreaChart data={data.timeline}><CartesianGrid strokeDasharray="3 3" stroke="#d7e8ec"/><XAxis dataKey="date" tick={{fill:'#71849a'}}/><YAxis tick={{fill:'#71849a'}}/><Tooltip contentStyle={{background:'rgba(255,255,255,.96)',border:'1px solid #cce2e6',color:'#173249',borderRadius:12}}/><Area type="monotone" dataKey="allowed" name="Permitidos" stroke="#28c7a9" strokeWidth={3} fill="#28c7a922"/><Area type="monotone" dataKey="denied" name="Denegados" stroke="#ef7180" strokeWidth={3} fill="#ef718011"/></AreaChart></ResponsiveContainer>:<Empty/>}</Panel>
       <Panel title="Resultado" subtitle="Distribución de decisiones"><ResponsiveContainer width="100%" height={280}><PieChart><Pie data={access} dataKey="value" innerRadius={70} outerRadius={100} paddingAngle={3}>{access.map((_,i)=><Cell key={i} fill={[COLORS[0],COLORS[3]][i]}/>)}</Pie><Tooltip/></PieChart></ResponsiveContainer><div className="legend"><i className="allow"/>Permitidos <i className="deny"/>Denegados</div></Panel>
-      <Panel title="Accesos por usuario" subtitle="Actividad total de las identidades">{data.accessesByUser.length?<ResponsiveContainer width="100%" height={310}><BarChart data={data.accessesByUser} layout="vertical" margin={{left:20}}><CartesianGrid strokeDasharray="3 3" stroke="#30415a"/><XAxis type="number" tick={{fill:'#aab6c8'}}/><YAxis type="category" dataKey="name" width={110} tick={{fill:'#d5deeb'}}/><Tooltip/><Bar dataKey="value" name="Accesos" fill="#40b9ff" radius={[0,5,5,0]}/></BarChart></ResponsiveContainer>:<Empty/>}</Panel>
-      <Panel title="Usuarios más denegados" subtitle="Identidades a investigar">{data.topDeniedUsers.length?<ResponsiveContainer width="100%" height={310}><BarChart data={data.topDeniedUsers} layout="vertical" margin={{left:20}}><CartesianGrid strokeDasharray="3 3" stroke="#30415a"/><XAxis type="number" tick={{fill:'#aab6c8'}}/><YAxis type="category" dataKey="name" width={110} tick={{fill:'#d5deeb'}}/><Tooltip/><Bar dataKey="value" name="Denegaciones" fill="#ff6376" radius={[0,5,5,0]}/></BarChart></ResponsiveContainer>:<Empty/>}</Panel>
-      <Panel title="Recursos más solicitados" subtitle="Nombres normalizados; la ruta completa aparece al pasar el cursor" wide>{data.topResources.length?<ResponsiveContainer width="100%" height={340}><BarChart data={data.topResources} layout="vertical" margin={{left:35,right:20}}><CartesianGrid strokeDasharray="3 3" stroke="#30415a"/><XAxis type="number" tick={{fill:'#aab6c8'}}/><YAxis type="category" dataKey="name" width={160} tick={{fill:'#d5deeb'}}/><Tooltip formatter={value=>[number(value),'Accesos']}/><Bar dataKey="value" fill="#7588ff" radius={[0,5,5,0]}/></BarChart></ResponsiveContainer>:<Empty/>}</Panel>
-      <Panel title="Servicios" subtitle="Accesos por repositorio"><div className="rank-list">{data.serviceDistribution.map((x,i)=><div key={x.name}><span><i style={{background:COLORS[i%COLORS.length]}}/>{x.name}</span><strong>{number(x.value)}</strong></div>)}</div></Panel>
+      <ResourceGallery title="Recursos más usados por servicio" subtitle="Un toro por servicio muestra la distribución de sus activos más consultados" groups={data.resourcesByService}/>
+      <ResourceGallery title="Recursos más usados por usuario" subtitle="La misma visión desde la identidad: qué recursos concentra cada usuario" groups={data.resourcesByUser}/>
+      <Panel title="Actividad por identidad" subtitle="Ranking proporcional de accesos y concentración de uso"><IdentityImpact items={data.accessesByUser}/></Panel>
+      <Panel title="Identidades con mayor riesgo" subtitle="Denegaciones priorizadas por intensidad relativa"><IdentityImpact items={data.topDeniedUsers} mode="risk"/></Panel>
       <Panel title="Recursos utilizados" subtitle="Nombre, base de datos o ruta y total de accesos de los últimos 7 días" full><DataTable rows={data.resourceTable}/></Panel>
       <Panel title="Origen geográfico" subtitle="Encuadre automático con unos 5 km de margen; las IP locales se agrupan en Embajadores 181" wide>{map?.databaseReady?<MapContainer center={[40.3912,-3.69233]} zoom={12} className="map"><MapViewport points={map.points}/><TileLayer attribution='&copy; OpenStreetMap' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"/>{map.points.map(p=><CircleMarker key={p.ip} center={[p.lat,p.lng]} radius={Math.max(7,Math.min(26,Math.sqrt(p.count)))} pathOptions={{color:p.local?'#ffb94a':'#22d3b6',fillColor:p.local?'#ffb94a':'#22d3b6',fillOpacity:.7}}><Popup><b>{p.city || p.country}</b><br/>{p.ip}: {p.count} accesos</Popup></CircleMarker>)}</MapContainer>:<Empty>El índice geográfico aún no está construido.</Empty>}</Panel>
       <Panel title="IPs con más denegaciones" subtitle="Origen de eventos bloqueados"><div className="rank-list">{data.topDeniedIps.map((x,i)=><div key={x.name}><span><em>{i+1}</em>{x.name}</span><strong>{number(x.value)}</strong></div>)}</div></Panel>
@@ -90,13 +136,13 @@ function Dashboard({data, map}) {
 
 function ChatChart({chart}) {
   if (!chart?.data?.length) return null;
-  return <div className="chat-chart"><strong>{chart.title}</strong><ResponsiveContainer width="100%" height={Math.min(300,Math.max(150,chart.data.length*34))}><BarChart data={chart.data.slice(0,10)} layout="vertical" margin={{left:8,right:18}}><XAxis type="number" tick={{fill:'#aab6c8'}} allowDecimals={false}/><YAxis type="category" dataKey="name" width={115} tick={{fill:'#d5deeb'}}/><Tooltip/><Bar dataKey="value" fill="#22d3b6" radius={[0,4,4,0]}/></BarChart></ResponsiveContainer></div>;
+  return <div className="chat-chart"><strong>{chart.title}</strong><ResponsiveContainer width="100%" height={Math.min(300,Math.max(150,chart.data.length*34))}><BarChart data={chart.data.slice(0,10)} layout="vertical" margin={{left:8,right:18}}><XAxis type="number" tick={{fill:'#71849a'}} allowDecimals={false}/><YAxis type="category" dataKey="name" width={115} tick={{fill:'#21364a'}}/><Tooltip/><Bar dataKey="value" fill="#28c7a9" radius={[0,7,7,0]}/></BarChart></ResponsiveContainer></div>;
 }
 
 function Chat({period, excludeInternal, sampleSize, model}) {
   // El alcance visual (periodo, identidades y muestra) también viaja al chat;
   // así una respuesta nunca mezcla universos distintos a los del dashboard.
-  const [messages,setMessages]=useState([{role:'bot',text:'Soy el analista de seguridad de Apache Ranger. Solo uso GET /service/xaudit/access_audit para auditorías (excluyendo usuarios internos mediante excludeUser) y GET /service/public/v2/api/policy para políticas. Puedo cruzar accesos, usuarios externos, servicios, operaciones, recursos e IP, y responder con texto, tabla o gráfica. No tengo APIs de escritura y nunca modifico Ranger.'}]);
+  const [messages,setMessages]=useState([{role:'bot',text:'Soy el analista de seguridad de Apache Ranger. Consulto auditorías de solo lectura en Solr mediante Kerberos y políticas mediante la API GET de Ranger. Puedo cruzar accesos, usuarios externos, servicios, operaciones, recursos e IP, y responder con texto, tabla o gráfica. Nunca modifico Ranger.'}]);
   const [text,setText]=useState(''); const [busy,setBusy]=useState(false);
   const send=async()=>{if(!text.trim()||busy)return;const q=text.trim();setMessages(m=>[...m,{role:'user',text:q}]);setText('');setBusy(true);try{const r=await request('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q,period,exclude_internal:excludeInternal,sample_size:sampleSize,model})});setMessages(m=>[...m,{role:'bot',text:r.answer,table:r.table,chart:r.chart,model:r.model,warning:r.gatewayWarning}]);}catch(e){setMessages(m=>[...m,{role:'error',text:e.message}]);}finally{setBusy(false)}};
   return <section className="chat"><div className="chat-title"><div className="bot-icon"><ShieldCheck/></div><div><h2>Analista Ranger</h2><p><span/> AI Gateway · {model} · Solo lectura</p></div></div><div className="messages">{messages.map((m,i)=><div key={i} className={`message ${m.role}`}><p>{m.text}</p>{m.model&&<small className="model-badge">Modelo: {m.model}{m.warning?' · respuesta determinista de respaldo':''}</small>}{m.chart&&<ChatChart chart={m.chart}/>} {m.table?.length>0&&<DataTable rows={m.table} limit={20}/>}</div>)}{busy&&<div className="message bot dots">Consultando {model} a través de AI Gateway…</div>}</div><div className="suggestions">{['¿Qué APIs puedes llamar?','Dime los accesos de la última hora','Usuarios que han accedido y a qué servicio','¿Qué recursos fueron los más solicitados?'].map(q=><button key={q} onClick={()=>setText(q)}>{q}</button>)}</div><div className="composer"><input value={text} onChange={e=>setText(e.target.value)} onKeyDown={e=>e.key==='Enter'&&send()} placeholder="Pregunta sobre accesos, usuarios, servicios, recursos o políticas…"/><button onClick={send} disabled={busy}><Send size={18}/></button></div></section>;
@@ -127,7 +173,7 @@ function App(){
   const logout=async()=>{try{await request('/auth/logout',{method:'POST'})}finally{setAuth(null);setData(undefined)}};
   if(auth===undefined)return <div className="auth-loading"><RefreshCw className="spin"/>Validando sesión segura…</div>;
   if(!auth)return <LoginScreen onLogin={setAuth}/>;
-  return <main><nav><div className="brand"><div><ShieldCheck/></div><span>RANGER<strong>INTELLIGENCE</strong></span></div><div className="nav-actions"><span className="signed-user">{auth.username}</span><label className="internal-toggle"><input type="checkbox" checked={excludeInternal} onChange={e=>setExcludeInternal(e.target.checked)}/><span/>Excluir usuarios internos</label><select value={model} onChange={e=>setModel(e.target.value)} title="Modelo de AI Gateway">{models.map(item=><option key={item} value={item}>LLM: {item}</option>)}</select><select className="sample-select" value={sampleSize} onChange={e=>setSampleSize(Number(e.target.value))} title="Tamaño de la muestra"><option value="1000">Muestra: 1.000</option><option value="5000">Muestra: 5.000</option><option value="10000">Muestra: 10.000</option><option value="30000">Muestra: 30.000</option><option value="50000">Muestra: 50.000</option><option value="100000">Muestra: 100.000</option></select><select value={period} onChange={e=>setPeriod(e.target.value)}><option value="24h">Últimas 24 horas</option><option value="7d">Últimos 7 días</option><option value="30d">Últimos 30 días</option><option value="3m">Últimos 3 meses</option><option value="6m">Últimos 6 meses</option></select><button onClick={load} title="Actualizar"><RefreshCw size={17}/></button><button onClick={()=>setLogs(true)}><FileClock size={17}/> Ver log</button><button onClick={logout}>Salir</button></div></nav><header className="hero"><div className="hero-title"><img src={rangerHero} alt="Agente del centro de operaciones Ranger"/><div><p>SECURITY OVERVIEW</p><h1>Centro de control</h1><span>Visibilidad unificada de accesos y políticas de Apache Ranger.</span></div></div><div className="status"><i/> Auditoría {runtimeConfig?.audit?.source || 'solr'} · {runtimeConfig?.audit?.server || 'base2.mole4.local'} · {excludeInternal?'Usuarios internos excluidos':'Todos los usuarios'}</div></header>{error?<div className="alert"><AlertTriangle/> {error}</div>:<Dashboard data={data} map={map}/>}<Chat period={period} excludeInternal={excludeInternal} sampleSize={sampleSize} model={model}/><footer>Muestra de {number(sampleSize)} auditorías · Consultas de solo lectura · {data?.configuredServices?.join(' · ')}</footer>{logs&&<Logs close={()=>setLogs(false)}/>}</main>;
+  return <main><nav><div className="brand"><div><ShieldCheck/></div><span>RANGER<strong>INTELLIGENCE</strong></span></div><div className="nav-actions"><span className="signed-user">{auth.username}</span><label className="internal-toggle"><input type="checkbox" checked={excludeInternal} onChange={e=>setExcludeInternal(e.target.checked)}/><span/>Excluir usuarios internos</label><select value={model} onChange={e=>setModel(e.target.value)} title="Modelo de AI Gateway">{models.map(item=><option key={item} value={item}>LLM: {item}</option>)}</select><select className="sample-select" value={sampleSize} onChange={e=>setSampleSize(Number(e.target.value))} title="Tamaño de la muestra"><option value="1000">Muestra: 1.000</option><option value="5000">Muestra: 5.000</option><option value="10000">Muestra: 10.000</option><option value="30000">Muestra: 30.000</option><option value="50000">Muestra: 50.000</option><option value="100000">Muestra: 100.000</option></select><select value={period} onChange={e=>setPeriod(e.target.value)}><option value="24h">Últimas 24 horas</option><option value="7d">Últimos 7 días</option><option value="30d">Últimos 30 días</option><option value="3m">Últimos 3 meses</option><option value="6m">Últimos 6 meses</option></select><button onClick={load} title="Actualizar"><RefreshCw size={17}/></button><button onClick={()=>setLogs(true)}><FileClock size={17}/> Ver log</button><button onClick={logout}>Salir</button></div></nav><header className="hero"><div className="hero-title"><div className="hero-logo-shell"><img src={rangerHero} alt="Agente del centro de operaciones Ranger"/></div><div><p>SECURITY OVERVIEW</p><h1>Centro de control</h1><span>Visibilidad unificada de accesos y políticas de Apache Ranger.</span></div></div><div className="status"><i/> Auditoría {runtimeConfig?.audit?.source || 'solr'} · {runtimeConfig?.audit?.server || 'base2.mole4.local'} · {excludeInternal?'Usuarios internos excluidos':'Todos los usuarios'}</div></header>{error?<div className="alert"><AlertTriangle/> {error}</div>:<Dashboard data={data} map={map}/>}<Chat period={period} excludeInternal={excludeInternal} sampleSize={sampleSize} model={model}/><footer>Muestra de {number(sampleSize)} auditorías · Consultas de solo lectura · {data?.configuredServices?.join(' · ')}</footer>{logs&&<Logs close={()=>setLogs(false)}/>}</main>;
 }
 
 createRoot(document.getElementById('root')).render(<App/>);

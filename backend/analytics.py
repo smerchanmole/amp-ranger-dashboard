@@ -31,6 +31,44 @@ def _top(counter: Counter[str], limit: int = 8) -> list[dict[str, Any]]:
     return [{"name": name or "(vacío)", "value": value} for name, value in counter.most_common(limit)]
 
 
+def _resource_groups(
+    counters: dict[str, Counter[Any]],
+    *,
+    resource_limit: int = 6,
+    include_service: bool = False,
+) -> list[dict[str, Any]]:
+    """Serializa recursos por dimensión sin perder el denominador.
+
+    Cada widget recibe el total completo de su servicio/usuario y los recursos
+    principales. La categoría ``Otros`` conserva los accesos que quedan fuera
+    del ranking, evitando que el toro visual sugiera una cobertura del 100 %
+    cuando solo se muestran los primeros elementos.
+    """
+    groups = []
+    for owner, counter in sorted(counters.items(), key=lambda item: sum(item[1].values()), reverse=True):
+        total = sum(counter.values())
+        resources = []
+        visible_total = 0
+        for identity, count in counter.most_common(resource_limit):
+            if include_service:
+                service, raw = identity
+            else:
+                service, raw = None, identity
+            name, context = resource_identity(raw)
+            resources.append({
+                "name": name, "service": service, "context": context,
+                "raw": raw, "value": count,
+            })
+            visible_total += count
+        if total > visible_total:
+            resources.append({
+                "name": "Otros", "service": None, "context": "Resto de recursos",
+                "raw": "", "value": total - visible_total,
+            })
+        groups.append({"name": owner or "(vacío)", "total": total, "resources": resources})
+    return groups
+
+
 def resource_identity(raw: Any) -> tuple[str, str]:
     """Convierte recursos Ranger (URL, Hive o HDFS) en nombre y contexto legibles."""
     value = unquote(str(raw or "desconocido")).strip()
@@ -81,6 +119,14 @@ def dashboard(audits: list[dict[str, Any]], policies: list[dict[str, Any]], serv
         for a in audits
     )
     accesses_by_user = Counter(str(a.get("requestUser") or "desconocido") for a in audits)
+    resources_by_service: dict[str, Counter[str]] = defaultdict(Counter)
+    resources_by_user: dict[str, Counter[tuple[str, str]]] = defaultdict(Counter)
+    for item in audits:
+        raw_resource = str(item.get("resourcePath") or item.get("resource") or "desconocido")
+        service = str(item.get("repoName") or item.get("serviceType") or "desconocido")
+        user = str(item.get("requestUser") or "desconocido")
+        resources_by_service[service][raw_resource] += 1
+        resources_by_user[user][(service, raw_resource)] += 1
     ips = Counter(str(a.get("clientIP") or "desconocida") for a in audits if not _allowed(a))
     denied_services = Counter(str(a.get("repoName") or "desconocido") for a in audits if not _allowed(a))
     service_distribution = Counter(str(a.get("repoName") or "desconocido") for a in audits)
@@ -119,6 +165,8 @@ def dashboard(audits: list[dict[str, Any]], policies: list[dict[str, Any]], serv
         "topDeniedServices": _top(denied_services),
         "topResources": [{"name": f'{row["service"]} · {row["name"]}', "service": row["service"], "context": row["context"], "value": row["value"]} for row in resource_rows[:10]],
         "resourceTable": resource_rows,
+        "resourcesByService": _resource_groups(resources_by_service),
+        "resourcesByUser": _resource_groups(resources_by_user, include_service=True),
         "accessesByUser": _top(accesses_by_user, 15),
         "serviceDistribution": _top(service_distribution, max(8, len(services))),
         "operations": _top(operations),

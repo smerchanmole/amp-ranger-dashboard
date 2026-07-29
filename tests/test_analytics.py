@@ -24,8 +24,25 @@ def test_dashboard_counts_and_rankings():
 
 def test_resources_with_same_name_are_separated_by_service():
     audits = AUDITS + [{**AUDITS[0], "repoName": "cm_hive"}]
-    rows = dashboard(audits, [], ["cm_hdfs", "cm_hive"])["resourceTable"]
+    result = dashboard(audits, [], ["cm_hdfs", "cm_hive"])
+    rows = result["resourceTable"]
     assert {(row["service"], row["value"]) for row in rows} == {("cm_hdfs", 2), ("cm_hive", 1)}
+    assert [(group["name"], group["total"]) for group in result["resourcesByService"]] == [
+        ("cm_hdfs", 2), ("cm_hive", 1),
+    ]
+
+
+def test_resource_widgets_are_grouped_by_user_with_complete_totals():
+    audits = AUDITS + [
+        {**AUDITS[0], "resourcePath": "/data/b"},
+        {**AUDITS[0], "resourcePath": "/data/c"},
+    ]
+    groups = dashboard(audits, [], ["cm_hdfs"])["resourcesByUser"]
+    ana = next(group for group in groups if group["name"] == "ana")
+
+    assert ana["total"] == 3
+    assert {resource["name"] for resource in ana["resources"]} == {"a", "b", "c"}
+    assert {resource["service"] for resource in ana["resources"]} == {"cm_hdfs"}
 
 
 def test_chat_is_limited_to_known_intents():
