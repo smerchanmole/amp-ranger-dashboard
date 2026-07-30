@@ -1,7 +1,7 @@
 import React, {useEffect, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import {AreaChart, Area, BarChart, Bar, CartesianGrid, Cell, PieChart, Pie, ResponsiveContainer, Tooltip, XAxis, YAxis} from 'recharts';
-import {Activity, AlertTriangle, CheckCircle2, Clock3, FileClock, RefreshCw, Send, Settings, ShieldCheck, Users, XCircle} from 'lucide-react';
+import {Activity, AlertTriangle, CheckCircle2, CircleHelp, Clock3, FileClock, RefreshCw, Send, Settings, ShieldCheck, Users, XCircle} from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
 import {CircleMarker, MapContainer, Popup, TileLayer, useMap} from 'react-leaflet';
 import rangerHero from '../../topo_ranger.PNG';
@@ -161,6 +161,17 @@ function DiagnosticsBar() {
   </aside>;
 }
 
+function FieldHelp({children, example}) {
+  const tooltip=`${children} Ejemplo: ${example}`;
+  return <span className="field-help" tabIndex="0" role="note" aria-label={tooltip} data-tooltip={tooltip}>
+    <CircleHelp size={15}/>
+  </span>;
+}
+
+function FieldTitle({children, help, example}) {
+  return <span className="field-title"><span>{children}</span><FieldHelp example={example}>{help}</FieldHelp></span>;
+}
+
 function Configuration({config, close, saved}) {
   const [form,setForm]=useState({
     ranger_url:config.ranger.url,ranger_auth_type:config.ranger.authType,ranger_user:config.ranger.user,
@@ -173,9 +184,28 @@ function Configuration({config, close, saved}) {
   const set=(key,value)=>setForm(current=>({...current,[key]:value}));
   const submit=async event=>{event.preventDefault();setBusy(true);setError('');try{const result=await request('/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...form,solr_port:Number(form.solr_port)})});saved(result);window.dispatchEvent(new Event('diagnostics-refresh'));close();}catch(err){setError(err.message)}finally{setBusy(false)}};
   return <div className="modal"><form className="config-panel" onSubmit={submit}><header><div><h2>Configuración</h2><p>Conexiones de Ranger, auditoría y modelo LLM para esta sesión CML.</p></div><button type="button" onClick={close}>Cerrar</button></header>
-    <fieldset><legend>Apache Ranger / Knox</legend><label className="span-2">URI de Ranger<input value={form.ranger_url} onChange={e=>set('ranger_url',e.target.value)} required/></label><label>Autenticación<select value={form.ranger_auth_type} onChange={e=>set('ranger_auth_type',e.target.value)}><option value="basic">Usuario y contraseña</option><option value="bearer">Bearer token</option><option value="none">Sin autenticación</option></select></label><label>Usuario<input value={form.ranger_user} onChange={e=>set('ranger_user',e.target.value)}/></label><label>Contraseña<input type="password" value={form.ranger_password} onChange={e=>set('ranger_password',e.target.value)} placeholder={config.ranger.hasPassword?'Configurada · dejar vacío para conservar':'Introducir contraseña'}/></label><label>Token Ranger<input type="password" value={form.ranger_token} onChange={e=>set('ranger_token',e.target.value)} placeholder={config.ranger.hasToken?'Configurado · dejar vacío para conservar':'Bearer token opcional'}/></label></fieldset>
-    <fieldset><legend>Fuente de auditoría</legend><label>Origen<select value={form.audit_source} onChange={e=>set('audit_source',e.target.value)}><option value="ranger">API Ranger vía Knox</option><option value="solr">Solr directo (avanzado)</option></select></label><label>Servidor Solr<input value={form.solr_server} onChange={e=>set('solr_server',e.target.value)}/></label><label>Puerto<input type="number" value={form.solr_port} onChange={e=>set('solr_port',e.target.value)}/></label><label>Colección<input value={form.solr_collection} onChange={e=>set('solr_collection',e.target.value)}/></label></fieldset>
-    <fieldset><legend>Modelo LLM</legend><label className="span-2">URI compatible con OpenAI<input value={form.ai_gateway_api_url} onChange={e=>set('ai_gateway_api_url',e.target.value)} required/></label><label>API key<input type="password" value={form.ai_gateway_token} onChange={e=>set('ai_gateway_token',e.target.value)} placeholder={config.llm.hasToken?'Configurada y conservada':'API key opcional'}/></label><label>CDP token<input type="password" value={form.cdp_token} onChange={e=>set('cdp_token',e.target.value)} placeholder={config.llm.hasCdpToken?'Configurado y conservado':'CDP token opcional'}/></label><label className="cml-jwt-toggle"><input type="checkbox" checked={form.use_cml_jwt} onChange={e=>set('use_cml_jwt',e.target.checked)}/><span>Usar automáticamente `/tmp/jwt` de CML {config.llm.cmlJwtAvailable?'(disponible)':'(no detectado)'}</span></label><p className="secret-state">Credencial activa: <strong>{config.llm.tokenSource==='cml_jwt'?'/tmp/jwt de CML':config.llm.tokenSource==='cdp_token'?'CDP token':config.llm.tokenSource==='api_key'?'API key':'ninguna'}</strong>. Los campos secretos quedan vacíos al reabrir por seguridad, pero el servidor conserva su valor.</p><label>Modelos (separados por coma)<input value={form.ai_gateway_models} onChange={e=>set('ai_gateway_models',e.target.value)} required/></label><label>Modelo predeterminado<input value={form.ai_gateway_default_model} onChange={e=>set('ai_gateway_default_model',e.target.value)} required/></label></fieldset>
+    <fieldset><legend>Apache Ranger / Knox</legend>
+      <label className="span-2"><FieldTitle help="URL base de Apache Ranger, normalmente publicada a través de Knox. No añadas una ruta REST concreta al final." example="https://gateway.example.com/environment/cdp-proxy-token/ranger">URI de Ranger</FieldTitle><input value={form.ranger_url} onChange={e=>set('ranger_url',e.target.value)} required/></label>
+      <label><FieldTitle help="Método con el que la aplicación se identifica ante Ranger: credenciales básicas, token Bearer o acceso sin autenticación." example="Bearer token">Autenticación</FieldTitle><select value={form.ranger_auth_type} onChange={e=>set('ranger_auth_type',e.target.value)}><option value="basic">Usuario y contraseña</option><option value="bearer">Bearer token</option><option value="none">Sin autenticación</option></select></label>
+      <label><FieldTitle help="Nombre del usuario técnico de Ranger. Solo se utiliza cuando eliges Usuario y contraseña." example="rangeradmin">Usuario</FieldTitle><input value={form.ranger_user} onChange={e=>set('ranger_user',e.target.value)}/></label>
+      <label><FieldTitle help="Contraseña del usuario técnico de Ranger. Déjala vacía al editar para conservar la que ya está configurada." example="la contraseña de rangeradmin">Contraseña</FieldTitle><input type="password" value={form.ranger_password} onChange={e=>set('ranger_password',e.target.value)} placeholder={config.ranger.hasPassword?'Configurada · dejar vacío para conservar':'Introducir contraseña'}/></label>
+      <label><FieldTitle help="Token Bearer aceptado por el endpoint de Ranger o Knox. Solo se utiliza con la autenticación Bearer." example="eyJhbGciOi...">Token Ranger</FieldTitle><input type="password" value={form.ranger_token} onChange={e=>set('ranger_token',e.target.value)} placeholder={config.ranger.hasToken?'Configurado · dejar vacío para conservar':'Bearer token opcional'}/></label>
+    </fieldset>
+    <fieldset><legend>Fuente de auditoría</legend>
+      <label><FieldTitle help="Servicio desde el que se leerán las auditorías: la API de Ranger a través de Knox o una conexión directa a Solr." example="API Ranger vía Knox">Origen</FieldTitle><select value={form.audit_source} onChange={e=>set('audit_source',e.target.value)}><option value="ranger">API Ranger vía Knox</option><option value="solr">Solr directo (avanzado)</option></select></label>
+      <label><FieldTitle help="Nombre DNS o IP del servidor Solr, sin protocolo ni ruta. Solo es necesario si seleccionas Solr directo." example="solr-master.example.internal">Servidor Solr</FieldTitle><input value={form.solr_server} onChange={e=>set('solr_server',e.target.value)}/></label>
+      <label><FieldTitle help="Puerto en el que escucha Solr. Debe ser un número entre 1 y 65535." example="8995">Puerto</FieldTitle><input type="number" value={form.solr_port} onChange={e=>set('solr_port',e.target.value)}/></label>
+      <label><FieldTitle help="Nombre exacto de la colección de Solr que contiene las auditorías de Apache Ranger." example="ranger_audits">Colección</FieldTitle><input value={form.solr_collection} onChange={e=>set('solr_collection',e.target.value)}/></label>
+    </fieldset>
+    <fieldset><legend>Modelo LLM</legend>
+      <label className="span-2"><FieldTitle help="URL base del endpoint de inferencia compatible con OpenAI. La aplicación añadirá /chat/completions automáticamente." example="https://ml.example.cloudera.site/namespaces/serving-default/endpoints/my-model/v1">URI compatible con OpenAI</FieldTitle><input value={form.ai_gateway_api_url} onChange={e=>set('ai_gateway_api_url',e.target.value)} required/></label>
+      <label><FieldTitle help="Clave Bearer específica del endpoint del modelo. Si ya está guardada, deja este campo vacío para conservarla." example="sk-... o el token entregado por el servicio">API key</FieldTitle><input type="password" value={form.ai_gateway_token} onChange={e=>set('ai_gateway_token',e.target.value)} placeholder={config.llm.hasToken?'Configurada y conservada':'API key opcional'}/></label>
+      <label><FieldTitle help="Token de acceso de CDP que se enviará como Bearer al modelo. Tiene prioridad sobre la API key y se conserva si dejas el campo vacío." example="el valor access_token obtenido de CDP">CDP token</FieldTitle><input type="password" value={form.cdp_token} onChange={e=>set('cdp_token',e.target.value)} placeholder={config.llm.hasCdpToken?'Configurado y conservado':'CDP token opcional'}/></label>
+      <label className="cml-jwt-toggle"><input type="checkbox" checked={form.use_cml_jwt} onChange={e=>set('use_cml_jwt',e.target.checked)}/><span>Usar automáticamente `/tmp/jwt` de CML {config.llm.cmlJwtAvailable?'(disponible)':'(no detectado)'}</span><FieldHelp example="/tmp/jwt con la propiedad access_token">Lee automáticamente la credencial temporal que CML crea para la sesión. Desactívalo para forzar el CDP token o la API key introducidos manualmente.</FieldHelp></label>
+      <p className="secret-state">Credencial activa: <strong>{config.llm.tokenSource==='cml_jwt'?'/tmp/jwt de CML':config.llm.tokenSource==='cdp_token'?'CDP token':config.llm.tokenSource==='api_key'?'API key':'ninguna'}</strong>. Los campos secretos quedan vacíos al reabrir por seguridad, pero el servidor conserva su valor.</p>
+      <label><FieldTitle help="Identificadores exactos de los modelos admitidos por el endpoint. Si hay varios, sepáralos con comas." example="nvidia/nemotron-3-nano,meta/llama-3.1-8b-instruct">Modelos (separados por coma)</FieldTitle><input value={form.ai_gateway_models} onChange={e=>set('ai_gateway_models',e.target.value)} required/></label>
+      <label><FieldTitle help="Modelo que se seleccionará inicialmente. Debe coincidir exactamente con uno de los identificadores de la lista de modelos." example="nvidia/nemotron-3-nano">Modelo predeterminado</FieldTitle><input value={form.ai_gateway_default_model} onChange={e=>set('ai_gateway_default_model',e.target.value)} required/></label>
+    </fieldset>
     {error&&<div className="login-error"><AlertTriangle size={17}/>{error}</div>}<footer><small>Los secretos se mantienen solo en la memoria del proceso y no se muestran de nuevo.</small><button type="submit" disabled={busy}>{busy?'Aplicando…':'Guardar y aplicar'}</button></footer>
   </form></div>;
 }

@@ -322,10 +322,28 @@ footer{text-align:center;color:#71889a;font-size:11px;margin-top:22px}
 .config-panel button{border:0;border-radius:12px;background:#120046;color:#FFFFFF;padding:10px 16px;cursor:pointer}
 .config-panel fieldset{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:18px 0;padding:18px;border:1px solid #CEDBE4;border-radius:18px}
 .config-panel legend{padding:0 8px;color:#120046;font-weight:700}.config-panel label{display:grid;gap:6px;color:#000000;font-size:12px}.config-panel .span-2{grid-column:1/-1}
+.config-panel .field-title{display:flex;align-items:center;gap:6px;min-height:18px}
+.field-help{position:relative;display:inline-grid;place-items:center;flex:0 0 auto;color:#5555F9;cursor:help;outline:none}
+.field-help:focus-visible{border-radius:50%;box-shadow:0 0 0 3px rgba(85,85,249,.2)}
+.field-help:after{
+  content:attr(data-tooltip);position:absolute;left:50%;bottom:calc(100% + 10px);z-index:25;
+  width:max-content;max-width:min(390px,72vw);padding:10px 12px;border-radius:10px;
+  background:#120046;color:#FFFFFF;font-size:11px;font-weight:500;line-height:1.45;
+  white-space:normal;overflow-wrap:anywhere;box-shadow:0 12px 30px rgba(18,0,70,.28);
+  opacity:0;visibility:hidden;transform:translate(-50%,5px);transition:.15s;pointer-events:none;
+}
+.field-help:before{
+  content:'';position:absolute;left:50%;bottom:calc(100% + 4px);z-index:26;
+  border:6px solid transparent;border-top-color:#120046;
+  opacity:0;visibility:hidden;transform:translateX(-50%);transition:.15s;pointer-events:none;
+}
+.field-help:hover:after,.field-help:hover:before,.field-help:focus-visible:after,.field-help:focus-visible:before{opacity:1;visibility:visible}
+.field-help:hover:after,.field-help:focus-visible:after{transform:translate(-50%,0)}
 .config-panel input,.config-panel select{width:100%;min-height:43px;padding:9px 11px;border:1px solid #CEDBE4;border-radius:11px;background:#FFFFFF;color:#000000}
 .config-panel input:focus,.config-panel select:focus{outline:3px solid #CEDBE4;border-color:#5555F9}
 .config-panel>footer{margin-top:14px;text-align:left}.config-panel>footer small{color:#656D73}
 .config-panel .cml-jwt-toggle{grid-column:1/-1;display:flex;align-items:center;gap:9px;padding:10px 12px;border:1px solid #CEDBE4;border-radius:11px;background:#F3F5F7}
+.config-panel .cml-jwt-toggle>span:nth-child(2){flex:1}
 .config-panel .cml-jwt-toggle input{width:17px;min-height:17px;margin:0;accent-color:#5555F9}
 .config-panel .secret-state{grid-column:1/-1;margin:0;padding:9px 11px;border-radius:10px;background:rgba(206,219,228,.5);color:#656D73;font-size:11px}
 .config-panel .secret-state strong{color:#120046}
