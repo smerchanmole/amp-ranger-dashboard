@@ -8,6 +8,7 @@ GET. Ningún KPI ni herramienta MCP puede construir endpoints arbitrarios.
 from __future__ import annotations
 
 from datetime import datetime
+import re
 from typing import Any
 
 import requests
@@ -37,17 +38,61 @@ class RangerClient:
         self.session.headers.update({"Accept": "application/json"})
 
     def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any] | list[Any]:
+        url = f"{self.settings.ranger_url.rstrip('/')}{path}"
         try:
             response = self.session.get(
-                f"{self.settings.ranger_url.rstrip('/')}{path}",
+                url,
                 params=params,
                 verify=self.settings.ranger_verify_ssl,
                 timeout=self.settings.ranger_timeout_seconds,
             )
-            response.raise_for_status()
+        except requests.exceptions.InvalidURL as exc:
+            raise RangerError(f"No se puede usar la URL de Ranger: la dirección no es válida ({url})") from exc
+        except requests.exceptions.SSLError as exc:
+            raise RangerError(f"No se llegó a la URL de Ranger por un error de certificado SSL: {exc}") from exc
+        except requests.exceptions.Timeout as exc:
+            raise RangerError(
+                f"No se llegó a la URL de Ranger: la conexión agotó el tiempo de espera "
+                f"({self.settings.ranger_timeout_seconds} s)"
+            ) from exc
+        except requests.exceptions.ConnectionError as exc:
+            raise RangerError(f"No se llegó a la URL de Ranger: error de red, DNS o conexión ({exc})") from exc
+        except requests.RequestException as exc:
+            raise RangerError(f"No se llegó a la URL de Ranger: error HTTP de conexión ({exc})") from exc
+
+        status = response.status_code
+        if status in (401, 403):
+            reason = "usuario o contraseña incorrectos" if status == 401 else "usuario autenticado sin permisos suficientes"
+            raise RangerError(
+                f"Se llegó a la URL de Ranger, pero la autenticación falló: {reason} (HTTP {status})"
+            )
+        if status >= 400:
+            raise RangerError(
+                f"Se llegó a la URL de Ranger, pero la llamada a la API {path} devolvió "
+                f"HTTP {status} {response.reason or ''}. {self._safe_response_summary(response)}"
+            )
+        try:
             return response.json()
-        except (requests.RequestException, ValueError) as exc:
-            raise RangerError(f"No se pudo consultar Apache Ranger: {exc}") from exc
+        except (requests.exceptions.JSONDecodeError, ValueError) as exc:
+            redirected = bool(response.history)
+            redirect_note = (
+                " La petición fue redirigida; revisa si Knox ha enviado la llamada a una página de login."
+                if redirected else ""
+            )
+            raise RangerError(
+                f"Se llegó a la URL de Ranger y el servidor aceptó la llamada (HTTP {status}), "
+                f"pero la API {path} no devolvió JSON válido.{redirect_note} "
+                f"{self._safe_response_summary(response)}"
+            ) from exc
+
+    @staticmethod
+    def _safe_response_summary(response: requests.Response) -> str:
+        """Describe la respuesta sin volcar cabeceras, cookies ni cuerpos completos."""
+        content_type = response.headers.get("content-type", "no indicado").split(";")[0]
+        text = re.sub(r"<[^>]+>", " ", response.text or "")
+        text = re.sub(r"\s+", " ", text).strip()
+        sample = text[:180] if text else "respuesta vacía"
+        return f"Tipo de contenido: {content_type}; respuesta: {sample}"
 
     def access_audits(
         self,
