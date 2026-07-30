@@ -433,6 +433,8 @@ nav{border-color:#CEDBE4}
 .resource-zone:before{background:rgba(206,219,228,.45)}
 .resource-widget{border-color:#CEDBE4;background:linear-gradient(145deg,#FFFFFF,rgba(206,219,228,.34));box-shadow:0 12px 32px rgba(18,0,70,.08),inset 0 1px 1px #FFFFFF}
 .entity-avatar,.identity-rank{background:#CEDBE4;color:#120046}
+.entity-avatar.service-logo{padding:6px;background:#FFFFFF;border:1px solid #CEDBE4}
+.entity-avatar.service-logo img{width:100%;height:100%;display:block;object-fit:contain}
 .identity-impact.risk .identity-rank{background:#FF8856;color:#000000}
 .identity-summary>div{border-color:#CEDBE4;background:linear-gradient(145deg,#FFFFFF,rgba(206,219,228,.42))}
 .identity-summary>div:after{background:rgba(85,85,249,.13)}

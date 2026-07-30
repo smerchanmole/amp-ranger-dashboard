@@ -5,6 +5,9 @@ import {Activity, AlertTriangle, CheckCircle2, CircleHelp, Clock3, FileClock, Re
 import 'leaflet/dist/leaflet.css';
 import {CircleMarker, MapContainer, Popup, TileLayer, useMap} from 'react-leaflet';
 import rangerHero from '../../topo_ranger_apache.png';
+import atlasLogo from './assets/services/apache-atlas.svg';
+import hadoopLogo from './assets/services/apache-hadoop.png';
+import hiveLogo from './assets/services/apache-hive.svg';
 import './styles.css';
 
 const API = import.meta.env.VITE_API_URL || '/api';
@@ -32,12 +35,26 @@ function Panel({title, subtitle, children, wide=false, full=false}) {
 
 function Empty({children='Sin datos para este periodo'}) { return <div className="empty">{children}</div>; }
 
+function ServiceIcon({name}) {
+  const normalized=String(name || '').toLowerCase();
+  const service=normalized.includes('atlas')
+    ? {src:atlasLogo,label:'Apache Atlas'}
+    : normalized.includes('hive')
+      ? {src:hiveLogo,label:'Apache Hive'}
+      : normalized.includes('hdfs') || normalized.includes('hadoop')
+        ? {src:hadoopLogo,label:'Apache Hadoop HDFS'}
+        : null;
+  return <div className={`entity-avatar ${service?'service-logo':''}`} title={service?.label || name}>
+    {service?<img src={service.src} alt={`Logo de ${service.label}`}/>:String(name || '??').slice(0,2).toUpperCase()}
+  </div>;
+}
+
 function ResourceGallery({title, subtitle, groups=[]}) {
   return <section className="resource-zone">
     <header className="section-heading"><div><span className="section-dot"/><h2>{title}</h2></div><p>{subtitle}</p></header>
     {groups.length ? <div className="resource-widget-grid">{groups.map(group=>
       <article className="resource-widget" key={group.name}>
-        <header><div className="entity-avatar">{group.name.slice(0,2).toUpperCase()}</div><div><h3>{group.name}</h3><small>{number(group.total)} accesos</small></div></header>
+        <header><ServiceIcon name={group.name}/><div><h3>{group.name}</h3><small>{number(group.total)} accesos</small></div></header>
         <div className="resource-widget-body">
           <div className="donut-shell">
             <ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={group.resources} dataKey="value" innerRadius="62%" outerRadius="88%" paddingAngle={2} stroke="rgba(255,255,255,.9)" strokeWidth={2}>{group.resources.map((_,index)=><Cell key={index} fill={COLORS[index%COLORS.length]}/>)}</Pie><Tooltip formatter={(value,name)=>[number(value),name]}/></PieChart></ResponsiveContainer>
