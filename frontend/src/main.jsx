@@ -1,14 +1,14 @@
 import React, {useEffect, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import {AreaChart, Area, BarChart, Bar, CartesianGrid, Cell, PieChart, Pie, ResponsiveContainer, Tooltip, XAxis, YAxis} from 'recharts';
-import {Activity, AlertTriangle, CheckCircle2, Clock3, FileClock, RefreshCw, Send, ShieldCheck, Users, XCircle} from 'lucide-react';
+import {Activity, AlertTriangle, CheckCircle2, Clock3, FileClock, RefreshCw, Send, Settings, ShieldCheck, Users, XCircle} from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
 import {CircleMarker, MapContainer, Popup, TileLayer, useMap} from 'react-leaflet';
 import rangerHero from '../../topo_ranger.PNG';
 import './styles.css';
 
 const API = import.meta.env.VITE_API_URL || '/api';
-const COLORS = ['#28c7a9','#49a9e8','#78d7d1','#8d7de8','#a9d76e','#f3b35c','#ef7180'];
+const COLORS = ['#FF550D','#120046','#5555F9','#656D73','#CEDBE4','#FF8856','#9999FB'];
 
 async function request(path, options) {
   const response = await fetch(`${API}${path}`, {...options, credentials:'include'});
@@ -66,9 +66,9 @@ function IdentityImpact({items=[], mode='access'}) {
     <div className="identity-list">{items.map((item,index)=>{
       const ratio=item.value/max;
       const share=total ? item.value*100/total : 0;
-      const hue=isRisk ? 355-22*ratio : 171+31*ratio;
-      const endHue=isRisk ? 337-10*ratio : 194+18*ratio;
-      return <article className="identity-row" key={item.name} style={{'--strength':`${Math.max(3,ratio*100)}%`,'--bar-start':`hsl(${hue} 76% ${isRisk?65:48}%)`,'--bar-end':`hsl(${endHue} 78% ${isRisk?58:55}%)`}}>
+      const barStart=isRisk ? '#FF550D' : '#5555F9';
+      const barEnd=isRisk ? '#FF8856' : '#120046';
+      return <article className="identity-row" key={item.name} style={{'--strength':`${Math.max(3,ratio*100)}%`,'--bar-start':barStart,'--bar-end':barEnd}}>
         <div className="identity-rank">{String(index+1).padStart(2,'0')}</div>
         <div className="identity-name"><span>{item.name}</span><small>{isRisk?`${severity(ratio)} prioridad relativa`:`${share.toFixed(1)}% de la actividad`}</small></div>
         <div className="identity-track"><i/><span/></div>
@@ -119,14 +119,14 @@ function Dashboard({data, map}) {
       <Kpi label="KO · Muestra" value={s.denied} sub={`${s.denialRate}% de denegación`} tone="red" icon={AlertTriangle}/>
     </div>
     <div className="grid">
-      <Panel title="Evolución de accesos" subtitle="Permitidos y denegados por día" wide>{data.timeline.length?<ResponsiveContainer width="100%" height={280}><AreaChart data={data.timeline}><CartesianGrid strokeDasharray="3 3" stroke="#d7e8ec"/><XAxis dataKey="date" tick={{fill:'#71849a'}}/><YAxis tick={{fill:'#71849a'}}/><Tooltip contentStyle={{background:'rgba(255,255,255,.96)',border:'1px solid #cce2e6',color:'#173249',borderRadius:12}}/><Area type="monotone" dataKey="allowed" name="Permitidos" stroke="#28c7a9" strokeWidth={3} fill="#28c7a922"/><Area type="monotone" dataKey="denied" name="Denegados" stroke="#ef7180" strokeWidth={3} fill="#ef718011"/></AreaChart></ResponsiveContainer>:<Empty/>}</Panel>
+      <Panel title="Evolución de accesos" subtitle="Permitidos y denegados por día" wide>{data.timeline.length?<ResponsiveContainer width="100%" height={280}><AreaChart data={data.timeline}><CartesianGrid stroke="#CEDBE4"/><XAxis dataKey="date" tick={{fill:'#656D73'}}/><YAxis tick={{fill:'#656D73'}}/><Tooltip contentStyle={{background:'#FFFFFF',border:'1px solid #CEDBE4',color:'#000000',borderRadius:12}}/><Area type="monotone" dataKey="allowed" name="Permitidos" stroke="#5555F9" strokeWidth={3} fill="#CEDBE4"/><Area type="monotone" dataKey="denied" name="Denegados" stroke="#FF550D" strokeWidth={3} fill="#FF8856"/></AreaChart></ResponsiveContainer>:<Empty/>}</Panel>
       <Panel title="Resultado" subtitle="Distribución de decisiones"><ResponsiveContainer width="100%" height={280}><PieChart><Pie data={access} dataKey="value" innerRadius={70} outerRadius={100} paddingAngle={3}>{access.map((_,i)=><Cell key={i} fill={[COLORS[0],COLORS[3]][i]}/>)}</Pie><Tooltip/></PieChart></ResponsiveContainer><div className="legend"><i className="allow"/>Permitidos <i className="deny"/>Denegados</div></Panel>
       <ResourceGallery title="Recursos más usados por servicio" subtitle="Un toro por servicio muestra la distribución de sus activos más consultados" groups={data.resourcesByService}/>
       <ResourceGallery title="Recursos más usados por usuario" subtitle="La misma visión desde la identidad: qué recursos concentra cada usuario" groups={data.resourcesByUser}/>
       <Panel title="Actividad por identidad" subtitle="Ranking proporcional de accesos y concentración de uso"><IdentityImpact items={data.accessesByUser}/></Panel>
       <Panel title="Identidades con mayor riesgo" subtitle="Denegaciones priorizadas por intensidad relativa"><IdentityImpact items={data.topDeniedUsers} mode="risk"/></Panel>
       <Panel title="Recursos utilizados" subtitle="Nombre, base de datos o ruta y total de accesos de los últimos 7 días" full><DataTable rows={data.resourceTable}/></Panel>
-      <Panel title="Origen geográfico" subtitle="Encuadre automático con unos 5 km de margen; las IP locales se agrupan en Embajadores 181" wide>{map?.databaseReady?<MapContainer center={[40.3912,-3.69233]} zoom={12} className="map"><MapViewport points={map.points}/><TileLayer attribution='&copy; OpenStreetMap' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"/>{map.points.map(p=><CircleMarker key={p.ip} center={[p.lat,p.lng]} radius={Math.max(7,Math.min(26,Math.sqrt(p.count)))} pathOptions={{color:p.local?'#ffb94a':'#22d3b6',fillColor:p.local?'#ffb94a':'#22d3b6',fillOpacity:.7}}><Popup><b>{p.city || p.country}</b><br/>{p.ip}: {p.count} accesos</Popup></CircleMarker>)}</MapContainer>:<Empty>El índice geográfico aún no está construido.</Empty>}</Panel>
+      <Panel title="Origen geográfico" subtitle="Encuadre automático con unos 5 km de margen; las IP locales se agrupan en Embajadores 181" wide>{map?.databaseReady?<MapContainer center={[40.3912,-3.69233]} zoom={12} className="map"><MapViewport points={map.points}/><TileLayer attribution='&copy; OpenStreetMap' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"/>{map.points.map(p=><CircleMarker key={p.ip} center={[p.lat,p.lng]} radius={Math.max(7,Math.min(26,Math.sqrt(p.count)))} pathOptions={{color:p.local?'#FF550D':'#5555F9',fillColor:p.local?'#FF550D':'#5555F9',fillOpacity:.7}}><Popup><b>{p.city || p.country}</b><br/>{p.ip}: {p.count} accesos</Popup></CircleMarker>)}</MapContainer>:<Empty>El índice geográfico aún no está construido.</Empty>}</Panel>
       <Panel title="IPs con más denegaciones" subtitle="Origen de eventos bloqueados"><div className="rank-list">{data.topDeniedIps.map((x,i)=><div key={x.name}><span><em>{i+1}</em>{x.name}</span><strong>{number(x.value)}</strong></div>)}</div></Panel>
       <Panel title="Últimos 100 accesos permitidos" subtitle="Eventos OK más recientes de la muestra" full><DataTable rows={data.recentAllowed} kind="ok"/></Panel>
       <Panel title="Últimos 100 accesos denegados" subtitle="Eventos KO que requieren atención" full><DataTable rows={data.recentDenied} kind="ko"/></Panel>
@@ -136,7 +136,7 @@ function Dashboard({data, map}) {
 
 function ChatChart({chart}) {
   if (!chart?.data?.length) return null;
-  return <div className="chat-chart"><strong>{chart.title}</strong><ResponsiveContainer width="100%" height={Math.min(300,Math.max(150,chart.data.length*34))}><BarChart data={chart.data.slice(0,10)} layout="vertical" margin={{left:8,right:18}}><XAxis type="number" tick={{fill:'#71849a'}} allowDecimals={false}/><YAxis type="category" dataKey="name" width={115} tick={{fill:'#21364a'}}/><Tooltip/><Bar dataKey="value" fill="#28c7a9" radius={[0,7,7,0]}/></BarChart></ResponsiveContainer></div>;
+  return <div className="chat-chart"><strong>{chart.title}</strong><ResponsiveContainer width="100%" height={Math.min(300,Math.max(150,chart.data.length*34))}><BarChart data={chart.data.slice(0,10)} layout="vertical" margin={{left:8,right:18}}><XAxis type="number" tick={{fill:'#656D73'}} allowDecimals={false}/><YAxis type="category" dataKey="name" width={115} tick={{fill:'#000000'}}/><Tooltip/><Bar dataKey="value" fill="#5555F9" radius={[0,7,7,0]}/></BarChart></ResponsiveContainer></div>;
 }
 
 function Chat({period, excludeInternal, sampleSize, model}) {
@@ -149,6 +149,24 @@ function Chat({period, excludeInternal, sampleSize, model}) {
 }
 
 function Logs({close}) {const [items,setItems]=useState([]);useEffect(()=>{request('/logs').then(x=>setItems(x.items))},[]);return <div className="modal"><div className="log-panel"><header><h2>Registro de actividad</h2><button onClick={close}>Cerrar</button></header>{items.length?items.map((x,i)=><pre key={i}>{JSON.stringify(x,null,2)}</pre>):<Empty>No hay consultas registradas todavía.</Empty>}</div></div>;}
+
+function Configuration({config, close, saved}) {
+  const [form,setForm]=useState({
+    ranger_url:config.ranger.url,ranger_auth_type:config.ranger.authType,ranger_user:config.ranger.user,
+    ranger_password:'',ranger_token:'',audit_source:config.audit.source,solr_server:config.audit.server,
+    solr_port:config.audit.port,solr_collection:config.audit.collection,ai_gateway_api_url:config.llm.apiUrl,
+    ai_gateway_token:'',ai_gateway_models:config.llm.models.join(','),ai_gateway_default_model:config.llm.defaultModel,
+  });
+  const [busy,setBusy]=useState(false); const [error,setError]=useState('');
+  const set=(key,value)=>setForm(current=>({...current,[key]:value}));
+  const submit=async event=>{event.preventDefault();setBusy(true);setError('');try{const result=await request('/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...form,solr_port:Number(form.solr_port)})});saved(result);close();}catch(err){setError(err.message)}finally{setBusy(false)}};
+  return <div className="modal"><form className="config-panel" onSubmit={submit}><header><div><h2>Configuración</h2><p>Conexiones de Ranger, auditoría y modelo LLM para esta sesión CML.</p></div><button type="button" onClick={close}>Cerrar</button></header>
+    <fieldset><legend>Apache Ranger / Knox</legend><label className="span-2">URI de Ranger<input value={form.ranger_url} onChange={e=>set('ranger_url',e.target.value)} required/></label><label>Autenticación<select value={form.ranger_auth_type} onChange={e=>set('ranger_auth_type',e.target.value)}><option value="basic">Usuario y contraseña</option><option value="bearer">Bearer token</option><option value="none">Sin autenticación</option></select></label><label>Usuario<input value={form.ranger_user} onChange={e=>set('ranger_user',e.target.value)}/></label><label>Contraseña<input type="password" value={form.ranger_password} onChange={e=>set('ranger_password',e.target.value)} placeholder={config.ranger.hasPassword?'Configurada · dejar vacío para conservar':'Introducir contraseña'}/></label><label>Token Ranger<input type="password" value={form.ranger_token} onChange={e=>set('ranger_token',e.target.value)} placeholder={config.ranger.hasToken?'Configurado · dejar vacío para conservar':'Bearer token opcional'}/></label></fieldset>
+    <fieldset><legend>Fuente de auditoría</legend><label>Origen<select value={form.audit_source} onChange={e=>set('audit_source',e.target.value)}><option value="ranger">API Ranger vía Knox</option><option value="solr">Solr directo (avanzado)</option></select></label><label>Servidor Solr<input value={form.solr_server} onChange={e=>set('solr_server',e.target.value)}/></label><label>Puerto<input type="number" value={form.solr_port} onChange={e=>set('solr_port',e.target.value)}/></label><label>Colección<input value={form.solr_collection} onChange={e=>set('solr_collection',e.target.value)}/></label></fieldset>
+    <fieldset><legend>Modelo LLM</legend><label className="span-2">URI compatible con OpenAI<input value={form.ai_gateway_api_url} onChange={e=>set('ai_gateway_api_url',e.target.value)} required/></label><label className="span-2">API key<input type="password" value={form.ai_gateway_token} onChange={e=>set('ai_gateway_token',e.target.value)} placeholder={config.llm.hasToken?'Configurada · dejar vacío para conservar':'Introducir API key'}/></label><label>Modelos (separados por coma)<input value={form.ai_gateway_models} onChange={e=>set('ai_gateway_models',e.target.value)} required/></label><label>Modelo predeterminado<input value={form.ai_gateway_default_model} onChange={e=>set('ai_gateway_default_model',e.target.value)} required/></label></fieldset>
+    {error&&<div className="login-error"><AlertTriangle size={17}/>{error}</div>}<footer><small>Los secretos se mantienen solo en la memoria del proceso y no se muestran de nuevo.</small><button type="submit" disabled={busy}>{busy?'Aplicando…':'Guardar y aplicar'}</button></footer>
+  </form></div>;
+}
 
 function LoginScreen({onLogin}) {
   const [username,setUsername]=useState(''); const [password,setPassword]=useState('');
@@ -165,7 +183,7 @@ function App(){
   const [models,setModels]=useState(['topito','qwen-local']); const [model,setModel]=useState('topito');
   const [runtimeConfig,setRuntimeConfig]=useState(null);
   const [data,setData]=useState(); const [map,setMap]=useState();
-  const [error,setError]=useState(''); const [logs,setLogs]=useState(false);
+  const [error,setError]=useState(''); const [logs,setLogs]=useState(false); const [configuration,setConfiguration]=useState(false);
   const load=()=>{setData();setError('');const filter=`exclude_internal=${excludeInternal}&sample_size=${sampleSize}`;Promise.all([request(`/dashboard?period=${period}&${filter}`),request(`/map?period=${period}&${filter}`)]).then(([d,m])=>{setData(d);setMap(m)}).catch(e=>setError(e.message))};
   useEffect(()=>{request('/auth/session').then(setAuth).catch(()=>setAuth(null));const expired=()=>setAuth(null);window.addEventListener('auth-expired',expired);return()=>window.removeEventListener('auth-expired',expired)},[]);
   useEffect(()=>{if(auth)request('/config').then(config=>{setRuntimeConfig(config);setModels(config.llm.models);setModel(config.llm.defaultModel)}).catch(()=>{})},[auth]);
@@ -173,7 +191,8 @@ function App(){
   const logout=async()=>{try{await request('/auth/logout',{method:'POST'})}finally{setAuth(null);setData(undefined)}};
   if(auth===undefined)return <div className="auth-loading"><RefreshCw className="spin"/>Validando sesión segura…</div>;
   if(!auth)return <LoginScreen onLogin={setAuth}/>;
-  return <main><nav><div className="brand"><div><ShieldCheck/></div><span>RANGER<strong>INTELLIGENCE</strong></span></div><div className="nav-actions"><span className="signed-user">{auth.username}</span><label className="internal-toggle"><input type="checkbox" checked={excludeInternal} onChange={e=>setExcludeInternal(e.target.checked)}/><span/>Excluir usuarios internos</label><select value={model} onChange={e=>setModel(e.target.value)} title="Modelo de AI Gateway">{models.map(item=><option key={item} value={item}>LLM: {item}</option>)}</select><select className="sample-select" value={sampleSize} onChange={e=>setSampleSize(Number(e.target.value))} title="Tamaño de la muestra"><option value="1000">Muestra: 1.000</option><option value="5000">Muestra: 5.000</option><option value="10000">Muestra: 10.000</option><option value="30000">Muestra: 30.000</option><option value="50000">Muestra: 50.000</option><option value="100000">Muestra: 100.000</option></select><select value={period} onChange={e=>setPeriod(e.target.value)}><option value="24h">Últimas 24 horas</option><option value="7d">Últimos 7 días</option><option value="30d">Últimos 30 días</option><option value="3m">Últimos 3 meses</option><option value="6m">Últimos 6 meses</option></select><button onClick={load} title="Actualizar"><RefreshCw size={17}/></button><button onClick={()=>setLogs(true)}><FileClock size={17}/> Ver log</button><button onClick={logout}>Salir</button></div></nav><header className="hero"><div className="hero-title"><div className="hero-logo-shell"><img src={rangerHero} alt="Agente del centro de operaciones Ranger"/></div><div><p>SECURITY OVERVIEW</p><h1>Centro de control</h1><span>Visibilidad unificada de accesos y políticas de Apache Ranger.</span></div></div><div className="status"><i/> Auditoría {runtimeConfig?.audit?.source || 'solr'} · {runtimeConfig?.audit?.server || 'base2.mole4.local'} · {excludeInternal?'Usuarios internos excluidos':'Todos los usuarios'}</div></header>{error?<div className="alert"><AlertTriangle/> {error}</div>:<Dashboard data={data} map={map}/>}<Chat period={period} excludeInternal={excludeInternal} sampleSize={sampleSize} model={model}/><footer>Muestra de {number(sampleSize)} auditorías · Consultas de solo lectura · {data?.configuredServices?.join(' · ')}</footer>{logs&&<Logs close={()=>setLogs(false)}/>}</main>;
+  const configSaved=config=>{setRuntimeConfig(config);setModels(config.llm.models);setModel(config.llm.defaultModel);load()};
+  return <main><nav><div className="brand"><div><ShieldCheck/></div><span>RANGER<strong>INTELLIGENCE</strong></span></div><div className="nav-actions"><span className="signed-user">{auth.username}</span><label className="internal-toggle"><input type="checkbox" checked={excludeInternal} onChange={e=>setExcludeInternal(e.target.checked)}/><span/>Excluir usuarios internos</label><select value={model} onChange={e=>setModel(e.target.value)} title="Modelo LLM">{models.map(item=><option key={item} value={item}>LLM: {item}</option>)}</select><select className="sample-select" value={sampleSize} onChange={e=>setSampleSize(Number(e.target.value))} title="Tamaño de la muestra"><option value="1000">Muestra: 1.000</option><option value="5000">Muestra: 5.000</option><option value="10000">Muestra: 10.000</option><option value="30000">Muestra: 30.000</option><option value="50000">Muestra: 50.000</option><option value="100000">Muestra: 100.000</option></select><select value={period} onChange={e=>setPeriod(e.target.value)}><option value="24h">Últimas 24 horas</option><option value="7d">Últimos 7 días</option><option value="30d">Últimos 30 días</option><option value="3m">Últimos 3 meses</option><option value="6m">Últimos 6 meses</option></select><button onClick={load} title="Actualizar"><RefreshCw size={17}/></button><button onClick={()=>setConfiguration(true)}><Settings size={17}/> Configuración</button><button onClick={()=>setLogs(true)}><FileClock size={17}/> Ver log</button><button onClick={logout}>Salir</button></div></nav><header className="hero"><div className="hero-title"><div className="hero-logo-shell"><img src={rangerHero} alt="Agente del centro de operaciones Ranger"/></div><div><p>Security overview</p><h1>Centro de control</h1><span>Visibilidad unificada de accesos y políticas de Apache Ranger.</span></div></div><div className="status"><i/> Auditoría {runtimeConfig?.audit?.source || 'ranger'} · {runtimeConfig?.ranger?.url || 'Knox'} · {excludeInternal?'Usuarios internos excluidos':'Todos los usuarios'}</div></header>{error?<div className="alert"><AlertTriangle/> {error}</div>:<Dashboard data={data} map={map}/>}<Chat period={period} excludeInternal={excludeInternal} sampleSize={sampleSize} model={model}/><footer>Muestra de {number(sampleSize)} auditorías · Consultas de solo lectura · {data?.configuredServices?.join(' · ')}</footer>{logs&&<Logs close={()=>setLogs(false)}/>} {configuration&&runtimeConfig&&<Configuration config={runtimeConfig} close={()=>setConfiguration(false)} saved={configSaved}/>}</main>;
 }
 
 createRoot(document.getElementById('root')).render(<App/>);

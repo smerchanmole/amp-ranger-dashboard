@@ -8,9 +8,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     """Contrato de despliegue: secretos, alcance, límites y rutas operativas."""
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # `.env.cml` tiene prioridad sobre la configuración local histórica.
+    model_config = SettingsConfigDict(env_file=(".env", ".env.cml"), extra="ignore")
 
-    ranger_url: str = "https://base3.mole4.local:6182"
+    ranger_url: str = "https://go01-aw-dl-gateway.go01-dem.ylcu-atmi.cloudera.site/go01-aw-dl/cdp-proxy/ranger"
+    ranger_auth_type: str = "basic"
+    ranger_token: str = ""
     ranger_user: str = "admin"
     ranger_password: str = ""
     ranger_verify_ssl: bool = False
@@ -18,7 +21,7 @@ class Settings(BaseSettings):
     ranger_audit_page_size: int = 5000
     ranger_timeout_seconds: int = 60
     ranger_exclude_users: str = "hdfs,hive,impala,kafka,nifi,spark"
-    audit_source: str = "solr"
+    audit_source: str = "ranger"
     solr_server: str = "base2.mole4.local"
     solr_port: int = 8995
     solr_collection: str = "ranger_audits"
@@ -43,11 +46,11 @@ class Settings(BaseSettings):
     app_cookie_secure: bool = True
     ssl_certfile: Path = Path("certs/localhost.crt")
     ssl_keyfile: Path = Path("certs/localhost.key")
-    server_ip: str = "192.168.1.98"
-    ai_gateway_api_url: str = "http://127.0.0.1:4000/v1"
+    server_ip: str = "127.0.0.1"
+    ai_gateway_api_url: str = "https://ml-64288d82-5dd.go01-dem.ylcu-atmi.cloudera.site/namespaces/serving-default/endpoints/mpark-nemotron/v1"
     ai_gateway_token: str = ""
-    ai_gateway_models: str = "topito,qwen-local"
-    ai_gateway_default_model: str = "topito"
+    ai_gateway_models: str = "mpark-nemotron"
+    ai_gateway_default_model: str = "mpark-nemotron"
     ai_gateway_timeout_seconds: int = 90
 
     @property

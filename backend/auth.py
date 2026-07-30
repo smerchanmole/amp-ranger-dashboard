@@ -11,6 +11,7 @@ import base64
 import hashlib
 import hmac
 import json
+import re
 import secrets
 from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
@@ -24,6 +25,16 @@ _attempts: dict[str, deque[datetime]] = defaultdict(deque)
 _attempt_lock = Lock()
 MAX_FAILURES = 5
 FAILURE_WINDOW = timedelta(minutes=5)
+SAFE_USERNAME = re.compile(r"^[A-Za-z0-9._@+-]{1,200}$")
+
+
+def cloudera_user(request: Request) -> str | None:
+    """Lee la identidad autenticada que el proxy de CML entrega a la app."""
+    for header in ("remote-user", "x-remote-user", "x-forwarded-user", "x-cdsw-user"):
+        value = (request.headers.get(header) or "").strip()
+        if value and SAFE_USERNAME.fullmatch(value):
+            return value
+    return None
 
 
 def _decode(value: str) -> bytes:
@@ -108,6 +119,9 @@ def require_user(request: Request) -> str:
     """Dependencia FastAPI que protege APIs y documentación."""
     from .main import settings  # import diferido para evitar un ciclo al arrancar
 
+    transparent_user = cloudera_user(request)
+    if transparent_user:
+        return transparent_user
     username = read_session(request.cookies.get(settings.app_cookie_name), settings)
     if not username:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Sesión no válida o caducada")

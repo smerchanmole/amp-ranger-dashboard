@@ -1,5 +1,29 @@
 # Ranger Security Intelligence
 
+## Despliegue rápido en Cloudera Machine Learning
+
+Sube la carpeta completa como proyecto y crea una **Web App** cuyo script de
+arranque sea:
+
+```text
+start.py
+```
+
+CML ejecutará `python start.py`. Ese único proceso instala `requirements.txt`,
+reutiliza el bundle React incluido (o lo compila si falta) y publica FastAPI en
+`127.0.0.1:$CDSW_APP_PORT`. No se deben configurar certificados en Uvicorn:
+el proxy de Cloudera termina HTTPS.
+
+Al entrar, el botón **Configuración** permite indicar la URI y credencial del
+modelo, la URI/autenticación de Ranger a través de Knox y, opcionalmente, un
+Solr directo. Los secretos se conservan solo en memoria y deben volver a
+introducirse después de reiniciar la Web App. Si no se configura
+`APP_AUTH_PASSWORD_HASH`, la aplicación confía en el control de acceso de CML;
+si se configura, mantiene además el login local.
+
+No copies tokens a `.env`, Git, documentación ni capturas. Utiliza variables de
+entorno de CML o introdúcelos en el panel después del arranque.
+
 ![Centro de operaciones Ranger Intelligence con los agentes topo](./topo_ranger.PNG)
 
 Plataforma de observabilidad y gobierno para Apache Ranger, preparada para desplegarse como aplicación en Cloudera AI Workbench. Combina una visión ejecutiva de KPIs, trazabilidad de accesos, geolocalización y consultas en lenguaje natural sobre un perímetro estrictamente de solo lectura.

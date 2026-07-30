@@ -33,7 +33,7 @@ def test_login_cookie_session_and_logout(monkeypatch):
     assert login.status_code == 200
     cookie = login.headers["set-cookie"].lower()
     assert "httponly" in cookie and "secure" in cookie and "samesite=strict" in cookie
-    assert client.get("/api/auth/session").json()["username"] == "smerchan"
+    assert client.get("/api/auth/session").json()["username"] == "Local: smerchan"
 
     logout = client.post("/api/auth/logout")
     assert logout.status_code == 200
@@ -43,3 +43,15 @@ def test_login_cookie_session_and_logout(monkeypatch):
 def test_openapi_is_protected():
     client = TestClient(app, base_url="https://testserver")
     assert client.get("/openapi.json").status_code == 401
+
+
+def test_cloudera_remote_user_has_priority_over_local_login():
+    client = TestClient(app, base_url="https://testserver", headers={"REMOTE-USER": "cml-admin"})
+    session = client.get("/api/auth/session")
+    assert session.status_code == 200
+    assert session.json() == {
+        "authenticated": True,
+        "username": "Cloudera: cml-admin",
+        "source": "cloudera",
+    }
+    assert client.get("/api/config").status_code == 200

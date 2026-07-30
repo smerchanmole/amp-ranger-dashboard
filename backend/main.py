@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 
 from .analytics import dashboard
 from .auth import (
-    clear_login_failures, clear_session_cookie, login_allowed, read_session,
+    clear_login_failures, clear_session_cookie, cloudera_user, login_allowed, read_session,
     record_login_failure, require_user, set_session_cookie, verify_password,
 )
 from .audit_log import JsonlAuditLog
@@ -55,6 +55,23 @@ class ChatRequest(BaseModel):
 class LoginRequest(BaseModel):
     username: str = Field(min_length=1, max_length=100)
     password: str = Field(min_length=1, max_length=500)
+
+
+class RuntimeConfigRequest(BaseModel):
+    """Campos operativos editables; los secretos vacíos conservan su valor."""
+    ranger_url: str = Field(min_length=8, max_length=1000)
+    ranger_auth_type: Literal["basic", "bearer", "none"] = "basic"
+    ranger_user: str = Field(default="", max_length=200)
+    ranger_password: str = Field(default="", max_length=4000)
+    ranger_token: str = Field(default="", max_length=8000)
+    audit_source: Literal["ranger", "solr"] = "ranger"
+    solr_server: str = Field(default="", max_length=500)
+    solr_port: int = Field(default=8995, ge=1, le=65535)
+    solr_collection: str = Field(default="ranger_audits", max_length=200)
+    ai_gateway_api_url: str = Field(min_length=8, max_length=1000)
+    ai_gateway_token: str = Field(default="", max_length=8000)
+    ai_gateway_models: str = Field(min_length=1, max_length=1000)
+    ai_gateway_default_model: str = Field(min_length=1, max_length=200)
 
 
 def dates(period: str) -> tuple[datetime, datetime]:
@@ -95,6 +112,11 @@ def load(period: str, exclude_internal: bool = True, sample_size: int = 5000):
 @app.post("/api/auth/login")
 def login(credentials: LoginRequest, request: Request, response: Response):
     """Intercambia credenciales por cookie; jamás registra la contraseña."""
+    transparent_user = cloudera_user(request)
+    if transparent_user:
+        return {"authenticated": True, "username": f"Cloudera: {transparent_user}", "source": "cloudera"}
+    if not settings.app_auth_password_hash:
+        raise HTTPException(503, "No se detectó usuario de Cloudera y el acceso local no está configurado")
     client_id = request.client.host if request.client else "unknown"
     if not login_allowed(client_id):
         log.append({"type": "login_blocked", "client": client_id})
@@ -108,15 +130,18 @@ def login(credentials: LoginRequest, request: Request, response: Response):
     clear_login_failures(client_id)
     set_session_cookie(response, settings.app_auth_username, settings)
     log.append({"type": "login_success", "username": settings.app_auth_username, "client": client_id})
-    return {"authenticated": True, "username": settings.app_auth_username}
+    return {"authenticated": True, "username": f"Local: {settings.app_auth_username}", "source": "local"}
 
 
 @app.get("/api/auth/session")
 def session(request: Request):
+    transparent_user = cloudera_user(request)
+    if transparent_user:
+        return {"authenticated": True, "username": f"Cloudera: {transparent_user}", "source": "cloudera"}
     username = read_session(request.cookies.get(settings.app_cookie_name), settings)
     if not username:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Sesión no válida o caducada")
-    return {"authenticated": True, "username": username}
+    return {"authenticated": True, "username": f"Local: {username}", "source": "local"}
 
 
 @app.post("/api/auth/logout")
@@ -136,17 +161,51 @@ def health(username: str = Depends(require_user)):
 
 @app.get("/api/config")
 def public_runtime_config(username: str = Depends(require_user)):
-    """Expone aliases, nunca tokens ni nombres/credenciales de proveedor."""
+    """Expone valores editables y solo indica si hay secretos configurados."""
     return {
         "serverIp": settings.server_ip,
+        "ranger": {
+            "url": settings.ranger_url,
+            "authType": settings.ranger_auth_type,
+            "user": settings.ranger_user,
+            "hasPassword": bool(settings.ranger_password),
+            "hasToken": bool(settings.ranger_token),
+        },
         "audit": {
             "source": settings.audit_source,
             "server": settings.solr_server,
             "port": settings.solr_port,
             "collection": settings.solr_collection,
         },
-        "llm": {"models": settings.gateway_models, "defaultModel": settings.ai_gateway_default_model},
+        "llm": {
+            "apiUrl": settings.ai_gateway_api_url,
+            "models": settings.gateway_models,
+            "defaultModel": settings.ai_gateway_default_model,
+            "hasToken": bool(settings.ai_gateway_token),
+        },
     }
+
+
+@app.post("/api/config")
+def update_runtime_config(payload: RuntimeConfigRequest, username: str = Depends(require_user)):
+    """Aplica configuración a este proceso CML sin escribir secretos en disco."""
+    global client, audit_client, gateway
+    values = payload.model_dump()
+    requested_models = [item.strip() for item in payload.ai_gateway_models.split(",") if item.strip()]
+    if payload.ai_gateway_default_model not in requested_models:
+        raise HTTPException(422, "El modelo predeterminado debe estar incluido en la lista de modelos")
+    for secret in ("ranger_password", "ranger_token", "ai_gateway_token"):
+        if not values[secret]:
+            values.pop(secret)
+    for key, value in values.items():
+        setattr(settings, key, value)
+    client = RangerClient(settings)
+    audit_client = SolrAuditClient(settings) if settings.audit_source == "solr" else client
+    gateway = AIGatewayClient(settings)
+    with _cache_lock:
+        _cache.clear()
+    log.append({"type": "runtime_config_updated", "username": username, "auditSource": settings.audit_source})
+    return public_runtime_config(username)
 
 
 @app.get("/api/dashboard")

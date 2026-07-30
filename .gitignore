@@ -1,11 +1,11 @@
 .env
+.env.cml
 .DS_Store
 .venv/
 __pycache__/
 .pytest_cache/
 *.pyc
 node_modules/
-frontend/dist/
 data/*.jsonl
 data/*.sqlite*
 data/krb5cc*

@@ -30,7 +30,10 @@ class RangerClient:
     def __init__(self, settings: Settings):
         self.settings = settings
         self.session = requests.Session()
-        self.session.auth = (settings.ranger_user, settings.ranger_password)
+        if settings.ranger_auth_type.casefold() == "bearer" and settings.ranger_token:
+            self.session.headers["Authorization"] = f"Bearer {settings.ranger_token}"
+        elif settings.ranger_auth_type.casefold() == "basic":
+            self.session.auth = (settings.ranger_user, settings.ranger_password)
         self.session.headers.update({"Accept": "application/json"})
 
     def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any] | list[Any]:
