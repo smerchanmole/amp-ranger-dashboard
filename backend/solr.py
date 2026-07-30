@@ -103,16 +103,27 @@ class KerberosTicket:
 
     def ensure(self) -> None:
         """Obtiene un TGT solo cuando el cache no contiene uno válido."""
+        if not self.settings.kerberos_enabled:
+            return
         with self._lock:
             if self._valid():
                 return
-            if not self.settings.kerberos_password:
-                raise SolrError("KERBEROS_PASSWORD no está configurada en .env")
             self.cache_path.parent.mkdir(parents=True, exist_ok=True)
+            keytab = self.settings.kerberos_keytab
+            if keytab:
+                command = [
+                    "kinit", "-kt", str(keytab.expanduser().resolve()), "-c",
+                    str(self.cache_path), self.settings.kerberos_principal,
+                ]
+                input_value = None
+            else:
+                if not self.settings.kerberos_password:
+                    raise SolrError("Kerberos está activado, pero no hay contraseña ni keytab configurados")
+                command = ["kinit", "-c", str(self.cache_path), self.settings.kerberos_principal]
+                input_value = f"{self.settings.kerberos_password}\n"
             try:
                 result = self.runner(
-                    ["kinit", "-c", str(self.cache_path), self.settings.kerberos_principal],
-                    input=f"{self.settings.kerberos_password}\n",
+                    command, input=input_value,
                     env=self.environment, text=True, capture_output=True, check=False,
                 )
             except OSError as exc:
@@ -164,19 +175,20 @@ class SolrAuditClient:
         self.ticket.ensure()
         command = [
             "curl", "--silent", "--show-error", "--fail-with-body",
-            "--negotiate", "-u", ":", "-G",
-            "--max-time", str(self.settings.solr_timeout_seconds),
         ]
+        if self.settings.kerberos_enabled:
+            command.extend(["--negotiate", "-u", ":"])
+        command.extend(["-G", "--max-time", str(self.settings.solr_timeout_seconds)])
         if not self.settings.solr_verify_ssl:
             command.append("-k")
         command.append(self.settings.solr_select_url)
         for key, value in params:
             command.extend(["--data-urlencode", f"{key}={value}"])
         try:
-            result = self.runner(
-                command, env=self.ticket.environment, text=True,
-                capture_output=True, check=False,
-            )
+            kwargs = {"text": True, "capture_output": True, "check": False}
+            if self.settings.kerberos_enabled:
+                kwargs["env"] = self.ticket.environment
+            result = self.runner(command, **kwargs)
         except OSError as exc:
             raise SolrError("No se encontró curl con soporte SPNEGO") from exc
         if result.returncode != 0:

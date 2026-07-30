@@ -28,11 +28,13 @@ class Settings(BaseSettings):
     solr_collection: str = "ranger_audits"
     solr_verify_ssl: bool = False
     solr_timeout_seconds: int = 90
+    kerberos_enabled: bool = False
     kerberos_user: str = "smerchan"
     kerberos_realm: str = "MOLE4.LOCAL"
     kerberos_kdc: str = "base1.mole4.local"
     kerberos_admin_server: str = "base1.mole4.local"
     kerberos_password: str = ""
+    kerberos_keytab: Path | None = None
     kerberos_ccache: Path = Path("data/krb5cc_ranger_solr")
     kerberos_config_file: Path = Path("data/krb5_ranger_solr.conf")
     audit_log_path: Path = Path("data/chat_audit.jsonl")

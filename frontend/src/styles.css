@@ -347,6 +347,12 @@ footer{text-align:center;color:#71889a;font-size:11px;margin-top:22px}
 .config-panel .cml-jwt-toggle input{width:17px;min-height:17px;margin:0;accent-color:#5555F9}
 .config-panel .secret-state{grid-column:1/-1;margin:0;padding:9px 11px;border-radius:10px;background:rgba(206,219,228,.5);color:#656D73;font-size:11px}
 .config-panel .secret-state strong{color:#120046}
+.config-panel .kerberos-toggle{display:flex;align-items:center;gap:11px;padding:11px 13px;border:1px solid #CEDBE4;border-radius:12px;background:#F3F5F7}
+.config-panel .kerberos-toggle>input{width:38px;min-height:21px;accent-color:#5555F9}
+.config-panel .kerberos-toggle>span{display:grid;gap:2px;flex:1}.config-panel .kerberos-toggle small{color:#656D73}
+.config-panel .kerberos-fields{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.config-panel .kerberos-settings.disabled .kerberos-fields{opacity:.48}
+.config-panel input:disabled{cursor:not-allowed;background:#F3F5F7}
 
 .auth-loading{min-height:100vh;display:flex;align-items:center;justify-content:center;gap:12px;color:#577387;background:#effafa}
 .login-page{min-height:100vh;display:grid;place-items:center;padding:28px;background:radial-gradient(circle at 75% 10%,rgba(172,232,246,.7),transparent 38%),linear-gradient(145deg,#f8fdfd,#e9f7f7)}
@@ -384,7 +390,7 @@ footer{text-align:center;color:#71889a;font-size:11px;margin-top:22px}
   .resource-widget-body{grid-template-columns:135px 1fr}
   .login-card{grid-template-columns:1fr}.login-card>img{height:180px;min-height:0}.login-content{padding:30px}.login-content h1{font-size:26px}
   .message{max-width:92%}.table-wrap td{max-width:220px}
-  .config-panel fieldset{grid-template-columns:1fr}.config-panel .span-2{grid-column:auto}.config-panel>footer{align-items:flex-start;flex-direction:column}
+  .config-panel fieldset,.config-panel .kerberos-fields{grid-template-columns:1fr}.config-panel .span-2{grid-column:auto}.config-panel>footer{align-items:flex-start;flex-direction:column}
 }
 @media(max-width:520px){
   .kpis.access-kpis{grid-template-columns:1fr}

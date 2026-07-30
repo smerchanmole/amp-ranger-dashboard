@@ -177,6 +177,11 @@ function Configuration({config, close, saved}) {
     ranger_url:config.ranger.url,ranger_auth_type:config.ranger.authType,ranger_user:config.ranger.user,
     ranger_password:'',ranger_token:'',audit_source:config.audit.source,solr_server:config.audit.server,
     solr_port:config.audit.port,solr_collection:config.audit.collection,ai_gateway_api_url:config.llm.apiUrl,
+    kerberos_enabled:config.kerberos.enabled,kerberos_user:config.kerberos.user,
+    kerberos_realm:config.kerberos.realm,kerberos_kdc:config.kerberos.kdc,
+    kerberos_admin_server:config.kerberos.adminServer,kerberos_password:'',
+    kerberos_keytab:config.kerberos.keytab,kerberos_ccache:config.kerberos.ccache,
+    kerberos_config_file:config.kerberos.configFile,
     ai_gateway_token:'',cdp_token:'',use_cml_jwt:config.llm.useCmlJwt,
     ai_gateway_models:config.llm.models.join(','),ai_gateway_default_model:config.llm.defaultModel,
   });
@@ -196,6 +201,19 @@ function Configuration({config, close, saved}) {
       <label><FieldTitle help="Nombre DNS o IP del servidor Solr, sin protocolo ni ruta. Solo es necesario si seleccionas Solr directo." example="solr-master.example.internal">Servidor Solr</FieldTitle><input value={form.solr_server} onChange={e=>set('solr_server',e.target.value)}/></label>
       <label><FieldTitle help="Puerto en el que escucha Solr. Debe ser un número entre 1 y 65535." example="8995">Puerto</FieldTitle><input type="number" value={form.solr_port} onChange={e=>set('solr_port',e.target.value)}/></label>
       <label><FieldTitle help="Nombre exacto de la colección de Solr que contiene las auditorías de Apache Ranger." example="ranger_audits">Colección</FieldTitle><input value={form.solr_collection} onChange={e=>set('solr_collection',e.target.value)}/></label>
+    </fieldset>
+    <fieldset className={`kerberos-settings ${form.kerberos_enabled?'enabled':'disabled'}`}><legend>Kerberos (opcional)</legend>
+      <label className="kerberos-toggle span-2"><input type="checkbox" checked={form.kerberos_enabled} onChange={e=>set('kerberos_enabled',e.target.checked)}/><span><strong>{form.kerberos_enabled?'Kerberos activado':'Kerberos desactivado'}</strong><small>Para Knox normalmente debe permanecer desactivado.</small></span><FieldHelp example="desactivado cuando Ranger se publica mediante Knox">Activa kinit y la negociación SPNEGO únicamente si conectas directamente con un servicio protegido por Kerberos.</FieldHelp></label>
+      <div className="kerberos-fields span-2" aria-disabled={!form.kerberos_enabled}>
+        <label><FieldTitle help="Usuario del principal Kerberos con el que se solicitará el ticket." example="smerchan">Usuario Kerberos</FieldTitle><input disabled={!form.kerberos_enabled} value={form.kerberos_user} onChange={e=>set('kerberos_user',e.target.value)}/></label>
+        <label><FieldTitle help="Realm Kerberos en mayúsculas. Se añadirá al usuario para formar usuario@REALM." example="EXAMPLE.LOCAL">Realm</FieldTitle><input disabled={!form.kerberos_enabled} value={form.kerberos_realm} onChange={e=>set('kerberos_realm',e.target.value)}/></label>
+        <label><FieldTitle help="Nombre DNS del Key Distribution Center que entrega los tickets Kerberos." example="kdc.example.local">Servidor KDC</FieldTitle><input disabled={!form.kerberos_enabled} value={form.kerberos_kdc} onChange={e=>set('kerberos_kdc',e.target.value)}/></label>
+        <label><FieldTitle help="Servidor administrativo del realm. Si coincide con el KDC, introduce el mismo nombre DNS." example="kdc.example.local">Admin server</FieldTitle><input disabled={!form.kerberos_enabled} value={form.kerberos_admin_server} onChange={e=>set('kerberos_admin_server',e.target.value)}/></label>
+        <label><FieldTitle help="Contraseña del principal Kerberos. No es necesaria si indicas un keytab. Déjala vacía para conservar la ya configurada." example="contraseña del principal usuario@REALM">Contraseña Kerberos</FieldTitle><input disabled={!form.kerberos_enabled} type="password" value={form.kerberos_password} onChange={e=>set('kerberos_password',e.target.value)} placeholder={config.kerberos.hasPassword?'Configurada · dejar vacío para conservar':'Opcional si usas keytab'}/></label>
+        <label><FieldTitle help="Ruta al fichero keytab dentro del contenedor CML. Si se indica, tendrá prioridad sobre la contraseña." example="/home/cdsw/secrets/ranger.keytab">Ruta del keytab</FieldTitle><input disabled={!form.kerberos_enabled} value={form.kerberos_keytab} onChange={e=>set('kerberos_keytab',e.target.value)}/></label>
+        <label><FieldTitle help="Ruta privada donde la aplicación guardará temporalmente el ticket Kerberos." example="data/krb5cc_ranger_solr">Caché de credenciales</FieldTitle><input disabled={!form.kerberos_enabled} value={form.kerberos_ccache} onChange={e=>set('kerberos_ccache',e.target.value)}/></label>
+        <label><FieldTitle help="Ruta del krb5.conf aislado que la aplicación generará con los datos del realm y el KDC." example="data/krb5_ranger_solr.conf">Fichero krb5.conf</FieldTitle><input disabled={!form.kerberos_enabled} value={form.kerberos_config_file} onChange={e=>set('kerberos_config_file',e.target.value)}/></label>
+      </div>
     </fieldset>
     <fieldset><legend>Modelo LLM</legend>
       <label className="span-2"><FieldTitle help="URL base del endpoint de inferencia compatible con OpenAI. La aplicación añadirá /chat/completions automáticamente." example="https://ml.example.cloudera.site/namespaces/serving-default/endpoints/my-model/v1">URI compatible con OpenAI</FieldTitle><input value={form.ai_gateway_api_url} onChange={e=>set('ai_gateway_api_url',e.target.value)} required/></label>

@@ -69,6 +69,15 @@ class RuntimeConfigRequest(BaseModel):
     solr_server: str = Field(default="", max_length=500)
     solr_port: int = Field(default=8995, ge=1, le=65535)
     solr_collection: str = Field(default="ranger_audits", max_length=200)
+    kerberos_enabled: bool = False
+    kerberos_user: str = Field(default="", max_length=200)
+    kerberos_realm: str = Field(default="", max_length=200)
+    kerberos_kdc: str = Field(default="", max_length=500)
+    kerberos_admin_server: str = Field(default="", max_length=500)
+    kerberos_password: str = Field(default="", max_length=4000)
+    kerberos_keytab: str = Field(default="", max_length=1000)
+    kerberos_ccache: str = Field(default="data/krb5cc_ranger_solr", max_length=1000)
+    kerberos_config_file: str = Field(default="data/krb5_ranger_solr.conf", max_length=1000)
     ai_gateway_api_url: str = Field(min_length=8, max_length=1000)
     ai_gateway_token: str = Field(default="", max_length=8000)
     cdp_token: str = Field(default="", max_length=8000)
@@ -222,6 +231,17 @@ def public_runtime_config(username: str = Depends(require_user)):
             "port": settings.solr_port,
             "collection": settings.solr_collection,
         },
+        "kerberos": {
+            "enabled": settings.kerberos_enabled,
+            "user": settings.kerberos_user,
+            "realm": settings.kerberos_realm,
+            "kdc": settings.kerberos_kdc,
+            "adminServer": settings.kerberos_admin_server,
+            "hasPassword": bool(settings.kerberos_password),
+            "keytab": str(settings.kerberos_keytab or ""),
+            "ccache": str(settings.kerberos_ccache),
+            "configFile": str(settings.kerberos_config_file),
+        },
         "llm": {
             "apiUrl": settings.ai_gateway_api_url,
             "models": settings.gateway_models,
@@ -243,9 +263,24 @@ def update_runtime_config(payload: RuntimeConfigRequest, username: str = Depends
     requested_models = [item.strip() for item in payload.ai_gateway_models.split(",") if item.strip()]
     if payload.ai_gateway_default_model not in requested_models:
         raise HTTPException(422, "El modelo predeterminado debe estar incluido en la lista de modelos")
-    for secret in ("ranger_password", "ranger_token", "ai_gateway_token", "cdp_token"):
+    if payload.kerberos_enabled:
+        required = {
+            "usuario": payload.kerberos_user,
+            "realm": payload.kerberos_realm,
+            "KDC": payload.kerberos_kdc,
+            "caché de credenciales": payload.kerberos_ccache,
+            "fichero krb5.conf": payload.kerberos_config_file,
+        }
+        missing = [label for label, value in required.items() if not value.strip()]
+        if missing:
+            raise HTTPException(422, f"Kerberos requiere: {', '.join(missing)}")
+        if not (payload.kerberos_password or payload.kerberos_keytab or settings.kerberos_password):
+            raise HTTPException(422, "Kerberos requiere una contraseña o la ruta de un keytab")
+    for secret in ("ranger_password", "ranger_token", "kerberos_password", "ai_gateway_token", "cdp_token"):
         if not values[secret]:
             values.pop(secret)
+    for path_field in ("kerberos_keytab", "kerberos_ccache", "kerberos_config_file"):
+        values[path_field] = Path(values[path_field]) if values[path_field] else None
     for key, value in values.items():
         setattr(settings, key, value)
     client = RangerClient(settings)

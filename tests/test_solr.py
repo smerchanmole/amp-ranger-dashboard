@@ -13,6 +13,7 @@ def completed(command, returncode=0, stdout="", stderr=""):
 def test_kerberos_uses_dedicated_cache_and_password_via_stdin(tmp_path):
     calls = []
     settings = Settings(
+        kerberos_enabled=True,
         kerberos_user="smerchan", kerberos_realm="MOLE4.LOCAL",
         kerberos_kdc="base1.mole4.local",
         kerberos_admin_server="base1.mole4.local",
@@ -36,6 +37,22 @@ def test_kerberos_uses_dedicated_cache_and_password_via_stdin(tmp_path):
     generated_config = (tmp_path / "krb5.conf").read_text(encoding="utf-8")
     assert "default_realm = MOLE4.LOCAL" in generated_config
     assert "kdc = base1.mole4.local" in generated_config
+
+
+def test_disabled_kerberos_does_not_run_kinit_or_add_spnego(tmp_path):
+    calls = []
+    payload = {"responseHeader": {"status": 0}, "response": {"numFound": 0, "docs": []}}
+    settings = Settings(kerberos_enabled=False, kerberos_ccache=tmp_path / "krb5cc")
+
+    def runner(command, **kwargs):
+        calls.append((command, kwargs))
+        return completed(command, stdout=json.dumps(payload))
+
+    SolrAuditClient(settings, runner).health()
+    assert len(calls) == 1
+    assert calls[0][0][0] == "curl"
+    assert "--negotiate" not in calls[0][0]
+    assert "env" not in calls[0][1]
 
 
 def test_kerberos_principal_only_adds_realm_when_configured():
