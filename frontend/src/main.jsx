@@ -4,7 +4,7 @@ import {AreaChart, Area, BarChart, Bar, CartesianGrid, Cell, PieChart, Pie, Resp
 import {Activity, AlertTriangle, CheckCircle2, CircleHelp, Clock3, FileClock, RefreshCw, Send, Settings, ShieldCheck, Users, XCircle} from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
 import {CircleMarker, MapContainer, Popup, TileLayer, useMap} from 'react-leaflet';
-import rangerHero from '../../topo_ranger.PNG';
+import rangerHero from '../../topo_ranger_apache.png';
 import './styles.css';
 
 const API = import.meta.env.VITE_API_URL || '/api';
@@ -154,7 +154,7 @@ function DiagnosticsBar() {
   const [services,setServices]=useState(null); const [checking,setChecking]=useState(false);
   const check=()=>{setChecking(true);request('/diagnostics').then(result=>setServices(result.services)).catch(()=>setServices(null)).finally(()=>setChecking(false))};
   useEffect(()=>{check();window.addEventListener('diagnostics-refresh',check);return()=>window.removeEventListener('diagnostics-refresh',check)},[]);
-  const labels={api:'API',solr:'SOLR',model:'MODELO'};
+  const labels={api:'API RANGER',solr:'SOLR',model:'MODELO'};
   return <aside className="connection-diagnostics" aria-label="Estado de conexiones">
     {Object.entries(labels).map(([key,label])=>{const state=services?.[key];const title=state?.ok?`Conectado correctamente en ${state.latencyMs} ms`:(state?.error||'Sin comprobar');return <span key={key} className={!state?'pending':state.ok?'ok':'ko'} title={title} data-tooltip={title}><i/>{label}</span>})}
     <button onClick={check} disabled={checking} title="Volver a comprobar conexiones"><RefreshCw size={14} className={checking?'spin':''}/></button>

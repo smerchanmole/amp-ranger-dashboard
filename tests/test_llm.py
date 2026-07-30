@@ -3,6 +3,8 @@ from backend.llm import AIGatewayClient, GatewayError
 
 
 class FakeResponse:
+    headers = {"content-type": "text/event-stream"}
+
     def raise_for_status(self):
         return None
 
@@ -59,7 +61,28 @@ def test_gateway_probe_performs_minimal_real_completion(monkeypatch):
     result = AIGatewayClient(settings).probe()
     assert result == {"connected": True, "model": "nemotron", "tokenSource": "api_key"}
     assert captured["url"] == "https://model.example/v1/chat/completions"
-    assert captured["json"]["max_tokens"] == 2
+    assert captured["json"]["max_tokens"] == 64
+
+
+def test_gateway_empty_stream_reports_safe_response_structure(monkeypatch):
+    class EmptyResponse(FakeResponse):
+        def iter_lines(self):
+            return [
+                b'data: {"id":"x","choices":[{"delta":{},"finish_reason":"length"}]}',
+                b"data: [DONE]",
+            ]
+
+    monkeypatch.setattr("backend.llm.requests.post", lambda *args, **kwargs: EmptyResponse())
+    settings = Settings(ai_gateway_default_model="nemotron", ai_gateway_models="nemotron")
+    try:
+        AIGatewayClient(settings).probe()
+    except GatewayError as exc:
+        message = str(exc)
+        assert "eventos=1" in message
+        assert "finish_reason=['length']" in message
+        assert "text/event-stream" in message
+    else:
+        raise AssertionError("Un stream vacío debía devolver diagnóstico estructural")
 
 
 def test_cml_jwt_is_preferred_over_manual_api_key(tmp_path):

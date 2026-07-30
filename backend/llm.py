@@ -42,20 +42,51 @@ class AIGatewayClient:
             )
             response.raise_for_status()
             parts: list[str] = []
+            event_count = 0
+            response_keys: set[str] = set()
+            choice_keys: set[str] = set()
+            finish_reasons: set[str] = set()
+            reasoning_fragments = 0
+            ignored_lines = 0
             for raw_line in response.iter_lines():
-                line = raw_line.decode("utf-8") if isinstance(raw_line, bytes) else str(raw_line)
-                if not line.startswith("data:"):
+                line = (raw_line.decode("utf-8") if isinstance(raw_line, bytes) else str(raw_line)).strip()
+                if not line:
                     continue
-                data = line[5:].strip()
+                if line.startswith("data:"):
+                    data = line[5:].strip()
+                elif line.startswith("{"):
+                    # Algunos endpoints ignoran stream=true y devuelven un único
+                    # objeto JSON compatible con OpenAI.
+                    data = line
+                else:
+                    ignored_lines += 1
+                    continue
                 if data == "[DONE]":
                     break
                 chunk = json.loads(data)
+                event_count += 1
+                response_keys.update(str(key) for key in chunk)
                 choice = (chunk.get("choices") or [{}])[0]
-                content = (choice.get("delta") or choice.get("message") or {}).get("content")
+                choice_keys.update(str(key) for key in choice)
+                if choice.get("finish_reason"):
+                    finish_reasons.add(str(choice["finish_reason"]))
+                message = choice.get("delta") or choice.get("message") or {}
+                if message.get("reasoning_content"):
+                    reasoning_fragments += 1
+                content = message.get("content") or choice.get("text")
                 if content:
                     parts.append(str(content))
             if not parts:
-                raise GatewayError("El modelo respondió sin contenido en el stream")
+                content_type = getattr(response, "headers", {}).get("content-type", "no indicado")
+                details = (
+                    f"HTTP correcto pero sin texto; tipo={content_type}, eventos={event_count}, "
+                    f"claves_respuesta={sorted(response_keys) or ['ninguna']}, "
+                    f"claves_choice={sorted(choice_keys) or ['ninguna']}, "
+                    f"finish_reason={sorted(finish_reasons) or ['no indicado']}, "
+                    f"fragmentos_razonamiento={reasoning_fragments}, "
+                    f"líneas_ignoradas={ignored_lines}"
+                )
+                raise GatewayError(f"El modelo respondió sin contenido utilizable. {details}")
             return "".join(parts).strip()
         except GatewayError:
             raise
@@ -69,7 +100,7 @@ class AIGatewayClient:
         self._stream_completion({
             "model": model,
             "messages": [{"role": "user", "content": "Responde únicamente OK"}],
-            "max_tokens": 2,
+            "max_tokens": 64,
             "temperature": 0.2,
             "top_p": 0.7,
         })
