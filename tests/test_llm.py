@@ -6,8 +6,12 @@ class FakeResponse:
     def raise_for_status(self):
         return None
 
-    def json(self):
-        return {"choices": [{"message": {"content": "Resumen gobernado"}}]}
+    def iter_lines(self):
+        return [
+            b'data: {"choices":[{"delta":{"content":"Resumen "}}]}',
+            b'data: {"choices":[{"delta":{"content":"gobernado"}}]}',
+            b"data: [DONE]",
+        ]
 
 
 def test_gateway_uses_alias_and_openai_compatible_endpoint(monkeypatch):
@@ -53,6 +57,25 @@ def test_gateway_probe_performs_minimal_real_completion(monkeypatch):
 
     monkeypatch.setattr("backend.llm.requests.post", fake_post)
     result = AIGatewayClient(settings).probe()
-    assert result == {"connected": True, "model": "nemotron"}
+    assert result == {"connected": True, "model": "nemotron", "tokenSource": "api_key"}
     assert captured["url"] == "https://model.example/v1/chat/completions"
     assert captured["json"]["max_tokens"] == 2
+
+
+def test_cml_jwt_is_preferred_over_manual_api_key(tmp_path):
+    jwt = tmp_path / "jwt"
+    jwt.write_text('{"access_token":"fresh-cdp-token"}', encoding="utf-8")
+    settings = Settings(
+        cdp_token="",
+        use_cml_jwt=True,
+        cml_jwt_path=jwt,
+        ai_gateway_token="older-api-key",
+    )
+    assert settings.effective_ai_token == ("fresh-cdp-token", "cml_jwt")
+
+
+def test_explicit_cdp_token_has_highest_priority(tmp_path):
+    jwt = tmp_path / "jwt"
+    jwt.write_text('{"access_token":"automatic-token"}', encoding="utf-8")
+    settings = Settings(cdp_token="explicit-token", cml_jwt_path=jwt, ai_gateway_token="api-key")
+    assert settings.effective_ai_token == ("explicit-token", "cdp_token")

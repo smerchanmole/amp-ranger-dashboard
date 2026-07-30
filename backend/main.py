@@ -71,6 +71,8 @@ class RuntimeConfigRequest(BaseModel):
     solr_collection: str = Field(default="ranger_audits", max_length=200)
     ai_gateway_api_url: str = Field(min_length=8, max_length=1000)
     ai_gateway_token: str = Field(default="", max_length=8000)
+    cdp_token: str = Field(default="", max_length=8000)
+    use_cml_jwt: bool = True
     ai_gateway_models: str = Field(min_length=1, max_length=1000)
     ai_gateway_default_model: str = Field(min_length=1, max_length=200)
 
@@ -225,6 +227,10 @@ def public_runtime_config(username: str = Depends(require_user)):
             "models": settings.gateway_models,
             "defaultModel": settings.ai_gateway_default_model,
             "hasToken": bool(settings.ai_gateway_token),
+            "hasCdpToken": bool(settings.cdp_token),
+            "useCmlJwt": settings.use_cml_jwt,
+            "cmlJwtAvailable": settings.cml_jwt_path.is_file(),
+            "tokenSource": settings.effective_ai_token[1],
         },
     }
 
@@ -237,7 +243,7 @@ def update_runtime_config(payload: RuntimeConfigRequest, username: str = Depends
     requested_models = [item.strip() for item in payload.ai_gateway_models.split(",") if item.strip()]
     if payload.ai_gateway_default_model not in requested_models:
         raise HTTPException(422, "El modelo predeterminado debe estar incluido en la lista de modelos")
-    for secret in ("ranger_password", "ranger_token", "ai_gateway_token"):
+    for secret in ("ranger_password", "ranger_token", "ai_gateway_token", "cdp_token"):
         if not values[secret]:
             values.pop(secret)
     for key, value in values.items():

@@ -1,6 +1,7 @@
 """Configuración centralizada y externalizable para cada entorno Cloudera."""
 
 from functools import lru_cache
+import json
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -49,8 +50,11 @@ class Settings(BaseSettings):
     server_ip: str = "127.0.0.1"
     ai_gateway_api_url: str = "https://ml-64288d82-5dd.go01-dem.ylcu-atmi.cloudera.site/namespaces/serving-default/endpoints/mpark-nemotron/v1"
     ai_gateway_token: str = ""
-    ai_gateway_models: str = "mpark-nemotron"
-    ai_gateway_default_model: str = "mpark-nemotron"
+    cdp_token: str = ""
+    use_cml_jwt: bool = True
+    cml_jwt_path: Path = Path("/tmp/jwt")
+    ai_gateway_models: str = "nvidia/nemotron-3-nano"
+    ai_gateway_default_model: str = "nvidia/nemotron-3-nano"
     ai_gateway_timeout_seconds: int = 90
 
     @property
@@ -65,6 +69,22 @@ class Settings(BaseSettings):
     def gateway_models(self) -> list[str]:
         """Aliases publicados por LiteLLM; nunca nombres directos de proveedor."""
         return [item.strip() for item in self.ai_gateway_models.split(",") if item.strip()]
+
+    @property
+    def effective_ai_token(self) -> tuple[str, str]:
+        """Token y procedencia, sin exponer el valor fuera del backend."""
+        if self.cdp_token.strip():
+            return self.cdp_token.strip(), "cdp_token"
+        if self.use_cml_jwt and self.cml_jwt_path.is_file():
+            try:
+                token = str(json.loads(self.cml_jwt_path.read_text(encoding="utf-8")).get("access_token") or "").strip()
+                if token:
+                    return token, "cml_jwt"
+            except (OSError, ValueError, TypeError):
+                pass
+        if self.ai_gateway_token.strip():
+            return self.ai_gateway_token.strip(), "api_key"
+        return "", "none"
 
     @property
     def kerberos_principal(self) -> str:
