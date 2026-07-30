@@ -36,3 +36,23 @@ def test_gateway_rejects_models_not_published_in_env():
         assert "no permitido" in str(exc)
     else:
         raise AssertionError("El gateway debía rechazar un modelo fuera del catálogo")
+
+
+def test_gateway_probe_performs_minimal_real_completion(monkeypatch):
+    settings = Settings(
+        ai_gateway_api_url="https://model.example/v1",
+        ai_gateway_token="token",
+        ai_gateway_default_model="nemotron",
+        ai_gateway_models="nemotron",
+    )
+    captured = {}
+
+    def fake_post(url, **kwargs):
+        captured.update({"url": url, **kwargs})
+        return FakeResponse()
+
+    monkeypatch.setattr("backend.llm.requests.post", fake_post)
+    result = AIGatewayClient(settings).probe()
+    assert result == {"connected": True, "model": "nemotron"}
+    assert captured["url"] == "https://model.example/v1/chat/completions"
+    assert captured["json"]["max_tokens"] == 2

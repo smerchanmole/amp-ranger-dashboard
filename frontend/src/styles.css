@@ -430,3 +430,21 @@ nav{border-color:#CEDBE4}
 .login-card{border-color:#CEDBE4;background:rgba(255,255,255,.92);box-shadow:0 30px 80px rgba(18,0,70,.18)}
 .login-content h1{color:#120046}.login-copy,.login-content small{color:#656D73}.login-content label{color:#000000}
 .login-content input{border-color:#CEDBE4;background:#FFFFFF;color:#000000}.login-content input:focus{border-color:#5555F9;box-shadow:0 0 0 4px rgba(85,85,249,.12)}
+
+.connection-diagnostics{
+  position:fixed;right:24px;bottom:20px;z-index:800;
+  display:flex;align-items:center;gap:8px;padding:9px 10px;
+  border:1px solid #CEDBE4;border-radius:18px;background:rgba(255,255,255,.96);
+  box-shadow:0 14px 38px rgba(18,0,70,.18);backdrop-filter:blur(16px);
+}
+.connection-diagnostics span{display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:10px;color:#120046;font-size:11px;font-weight:700}
+.connection-diagnostics span i{width:9px;height:9px;border-radius:50%;background:#656D73;box-shadow:0 0 0 3px rgba(101,109,115,.13)}
+.connection-diagnostics span.ok i{background:#238636;box-shadow:0 0 0 3px rgba(35,134,54,.14)}
+.connection-diagnostics span.ko i{background:#D1242F;box-shadow:0 0 0 3px rgba(209,36,47,.14)}
+.connection-diagnostics button{width:29px;height:29px;display:grid;place-items:center;border:0;border-radius:9px;background:#120046;color:#FFFFFF;cursor:pointer}
+.connection-diagnostics button:disabled{opacity:.65;cursor:wait}
+
+@media(max-width:760px){
+  .connection-diagnostics{right:12px;bottom:12px;gap:3px;padding:7px}
+  .connection-diagnostics span{padding:4px;font-size:9px}
+}

@@ -22,6 +22,34 @@ class AIGatewayClient:
     def __init__(self, settings: Settings):
         self.settings = settings
 
+    def probe(self) -> dict[str, Any]:
+        """Comprueba autenticación y respuesta real con el mínimo de tokens."""
+        model = self.settings.ai_gateway_default_model
+        headers = {"Content-Type": "application/json"}
+        if self.settings.ai_gateway_token:
+            headers["Authorization"] = f"Bearer {self.settings.ai_gateway_token}"
+        try:
+            response = requests.post(
+                f"{self.settings.ai_gateway_api_url.rstrip('/')}/chat/completions",
+                json={
+                    "model": model,
+                    "messages": [{"role": "user", "content": "Responde únicamente OK"}],
+                    "max_tokens": 2,
+                    "temperature": 0,
+                },
+                headers=headers,
+                timeout=self.settings.ai_gateway_timeout_seconds,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            if not payload.get("choices"):
+                raise GatewayError("El endpoint respondió sin choices")
+            return {"connected": True, "model": model}
+        except GatewayError:
+            raise
+        except (requests.RequestException, TypeError, ValueError) as exc:
+            raise GatewayError(f"Modelo no disponible: {exc}") from exc
+
     def explain(self, model: str, question: str, result: dict[str, Any]) -> str:
         if model not in self.settings.gateway_models:
             raise GatewayError(f"Modelo no permitido: {model}")

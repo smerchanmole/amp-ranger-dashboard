@@ -5,11 +5,12 @@ recibe credenciales Ranger; solo consume agregados y evidencias ya gobernadas.
 """
 
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 import hmac
 from pathlib import Path
 from threading import Lock
-from time import monotonic
+from time import monotonic, perf_counter
 from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
@@ -109,6 +110,43 @@ def load(period: str, exclude_internal: bool = True, sample_size: int = 5000):
         return value
 
 
+def _probe_service(check) -> dict:
+    started = perf_counter()
+    try:
+        detail = check()
+        return {
+            "ok": True,
+            "latencyMs": round((perf_counter() - started) * 1000),
+            "detail": detail,
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "latencyMs": round((perf_counter() - started) * 1000),
+            "error": str(exc)[:500],
+        }
+
+
+def connection_diagnostics() -> dict:
+    """Valida API, Solr y modelo de forma independiente y concurrente."""
+    probe_settings = settings.model_copy(
+        update={
+            "ranger_timeout_seconds": min(settings.ranger_timeout_seconds, 15),
+            "solr_timeout_seconds": min(settings.solr_timeout_seconds, 15),
+            "ai_gateway_timeout_seconds": min(settings.ai_gateway_timeout_seconds, 20),
+        }
+    )
+    checks = {
+        "api": lambda: RangerClient(probe_settings).health(),
+        "solr": lambda: SolrAuditClient(probe_settings).health(),
+        "model": lambda: AIGatewayClient(probe_settings).probe(),
+    }
+    with ThreadPoolExecutor(max_workers=3, thread_name_prefix="diagnostic") as executor:
+        futures = {name: executor.submit(_probe_service, check) for name, check in checks.items()}
+        results = {name: future.result() for name, future in futures.items()}
+    return {"services": results, "checkedAt": datetime.now(timezone.utc).isoformat()}
+
+
 @app.post("/api/auth/login")
 def login(credentials: LoginRequest, request: Request, response: Response):
     """Intercambia credenciales por cookie; jamás registra la contraseña."""
@@ -157,6 +195,11 @@ def health(username: str = Depends(require_user)):
         return {**audit_client.health(), "geoDatabase": geo.available(), "services": settings.services}
     except (RangerError, SolrError) as exc:
         return {"connected": False, "source": settings.audit_source, "error": str(exc), "geoDatabase": geo.available(), "services": settings.services}
+
+
+@app.get("/api/diagnostics")
+def diagnostics(username: str = Depends(require_user)):
+    return connection_diagnostics()
 
 
 @app.get("/api/config")
