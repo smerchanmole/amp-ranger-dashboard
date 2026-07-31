@@ -5,12 +5,13 @@ from backend.ranger import RangerClient, RangerError
 
 
 class FakeResponse:
-    def __init__(self, status=200, body="", content_type="application/json", reason=""):
+    def __init__(self, status=200, body="", content_type="application/json", reason="", url="https://ranger.example/final", headers=None):
         self.status_code = status
         self.text = body
-        self.headers = {"content-type": content_type}
+        self.headers = {"content-type": content_type, **(headers or {})}
         self.reason = reason
         self.history = []
+        self.url = url
 
     def json(self):
         if not self.text:
@@ -56,6 +57,49 @@ def test_ranger_reports_api_http_error():
     assert "llamada a la API /service/xaudit/access_audit" in message
     assert "HTTP 500" in message
     assert "Proxy failure" in message
+
+
+def test_ranger_accepts_complete_audit_endpoint_without_duplicating_path():
+    configured = "https://gateway.example/env/cdp-proxy-token/ranger/service/xaudit/access_audit"
+    client = RangerClient(Settings(ranger_url=configured))
+    captured = {}
+
+    def fake_get(url, **kwargs):
+        captured["url"] = url
+        return FakeResponse(status=200, body='{"totalCount": 1}', url=url)
+
+    client.session.get = fake_get
+    assert client.health()["connected"] is True
+    assert captured["url"] == configured
+
+
+def test_ranger_complete_endpoint_is_normalized_for_policy_calls():
+    configured = "https://gateway.example/env/cdp-proxy-token/ranger/service/xaudit/access_audit?ignored=true"
+    client = RangerClient(Settings(ranger_url=configured))
+    captured = {}
+
+    def fake_get(url, **kwargs):
+        captured["url"] = url
+        return FakeResponse(status=200, body="[]", url=url)
+
+    client.session.get = fake_get
+    client.policies()
+    assert captured["url"] == "https://gateway.example/env/cdp-proxy-token/ranger/service/public/v2/api/policy"
+
+
+def test_ranger_404_explains_that_status_is_real_but_knox_may_mask_auth():
+    message = error_from(FakeResponse(status=404, reason="Not Found"))
+    assert "realmente HTTP 404" in message
+    assert "no se ha convertido desde 401/403" in message
+    assert "Knox puede ocultar" in message
+    assert "URL solicitada:" in message
+    assert "URL final:" in message
+
+
+def test_ranger_404_with_authenticate_header_flags_authentication():
+    response = FakeResponse(status=404, headers={"www-authenticate": 'Bearer realm="knox"'})
+    message = error_from(response)
+    assert "problema de autenticación" in message
 
 
 def test_ranger_reports_empty_success_response():

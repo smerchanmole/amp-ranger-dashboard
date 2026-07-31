@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 import re
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import requests
 import urllib3
@@ -27,6 +28,7 @@ class RangerClient:
     """Cliente HTTP mínimo para auditorías y catálogo de políticas Ranger."""
     AUDIT_PATH = "/service/xaudit/access_audit"
     POLICY_PATH = "/service/public/v2/api/policy"
+    KNOWN_ENDPOINTS = (AUDIT_PATH, POLICY_PATH)
 
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -37,8 +39,19 @@ class RangerClient:
             self.session.auth = (settings.ranger_user, settings.ranger_password)
         self.session.headers.update({"Accept": "application/json"})
 
+    @classmethod
+    def normalize_base_url(cls, configured_url: str) -> str:
+        """Acepta la base de Ranger o cualquiera de sus endpoints conocidos."""
+        parsed = urlsplit(configured_url.strip())
+        path = parsed.path.rstrip("/")
+        for endpoint in cls.KNOWN_ENDPOINTS:
+            if path.endswith(endpoint):
+                path = path[:-len(endpoint)].rstrip("/")
+                break
+        return urlunsplit((parsed.scheme, parsed.netloc, path, "", "")).rstrip("/")
+
     def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any] | list[Any]:
-        url = f"{self.settings.ranger_url.rstrip('/')}{path}"
+        url = f"{self.normalize_base_url(self.settings.ranger_url)}{path}"
         try:
             response = self.session.get(
                 url,
@@ -64,12 +77,28 @@ class RangerClient:
         if status in (401, 403):
             reason = "usuario o contraseña incorrectos" if status == 401 else "usuario autenticado sin permisos suficientes"
             raise RangerError(
-                f"Se llegó a la URL de Ranger, pero la autenticación falló: {reason} (HTTP {status})"
+                f"Se llegó a la URL de Ranger, pero la autenticación falló: {reason} (HTTP {status}). "
+                f"{self._response_route(response, url)}"
             )
         if status >= 400:
+            auth_hint = ""
+            if status == 404:
+                if response.headers.get("www-authenticate"):
+                    auth_hint = (
+                        " La respuesta incluye WWW-Authenticate: el gateway está señalando "
+                        "un problema de autenticación aunque haya usado HTTP 404."
+                    )
+                else:
+                    auth_hint = (
+                        " El estado recibido por el cliente es realmente HTTP 404; no se ha "
+                        "convertido desde 401/403. Knox puede ocultar un recurso no autorizado "
+                        "como 404, por lo que una respuesta vacía no permite distinguir entre "
+                        "ruta inexistente y autorización ocultada."
+                    )
             raise RangerError(
                 f"Se llegó a la URL de Ranger, pero la llamada a la API {path} devolvió "
-                f"HTTP {status} {response.reason or ''}. {self._safe_response_summary(response)}"
+                f"HTTP {status} {response.reason or ''}. {self._response_route(response, url)} "
+                f"{self._safe_response_summary(response)}{auth_hint}"
             )
         try:
             return response.json()
@@ -82,8 +111,15 @@ class RangerClient:
             raise RangerError(
                 f"Se llegó a la URL de Ranger y el servidor aceptó la llamada (HTTP {status}), "
                 f"pero la API {path} no devolvió JSON válido.{redirect_note} "
-                f"{self._safe_response_summary(response)}"
+                f"{self._response_route(response, url)} {self._safe_response_summary(response)}"
             ) from exc
+
+    @staticmethod
+    def _response_route(response: requests.Response, requested_url: str) -> str:
+        final_url = getattr(response, "url", None) or requested_url
+        history = [str(item.status_code) for item in getattr(response, "history", [])]
+        chain = " -> ".join([*history, str(response.status_code)])
+        return f"URL solicitada: {requested_url}; URL final: {final_url}; cadena HTTP: {chain}."
 
     @staticmethod
     def _safe_response_summary(response: requests.Response) -> str:

@@ -293,7 +293,7 @@ Cada parámetro dispone de un icono de interrogación con descripción y ejemplo
 
 | Campo | Descripción |
 |---|---|
-| URI de Ranger | URL base de Ranger publicada por Knox; la aplicación añade las rutas REST |
+| URI de Ranger | URL base publicada por Knox o URL completa de `access_audit`; ambos formatos se normalizan |
 | Autenticación | `basic`, `bearer` o `none` |
 | Usuario | usuario técnico o usuario de workload |
 | Contraseña | valor de `WORKLOAD_PASSWORD`; se genera en **User Settings** de Cloudera |
@@ -304,6 +304,16 @@ Ejemplo de URL:
 ```text
 https://gateway.example.cloudera.site/environment/cdp-proxy-token/ranger
 ```
+
+También se acepta:
+
+```text
+https://gateway.example.cloudera.site/service/xaudit/access_audit
+```
+
+Si se introduce el endpoint completo, la aplicación elimina internamente
+`/service/xaudit/access_audit` para obtener la base y evita duplicar la ruta.
+Esto permite usar después esa misma base para consultar políticas.
 
 ### 7.2 Auditoría
 
