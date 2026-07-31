@@ -1,723 +1,856 @@
-# Ranger Security Intelligence
+# Apache Ranger Intelligence Dashboard para Cloudera CML
 
-## Despliegue rápido en Cloudera Machine Learning
+<p align="center">
+  <img src="./topo_ranger_apache.png" alt="Apache Ranger sobre un centro de operaciones con dashboards" width="420">
+</p>
 
-Sube la carpeta completa como proyecto y crea una **Web App** cuyo script de
-arranque sea:
+<p align="center">
+  Dashboard de auditoría, gobierno y análisis de Apache Ranger preparado para ejecutarse como una Web App de Cloudera Machine Learning.
+</p>
+
+> **Estado del proyecto:** primera versión funcional para pruebas en CML. La
+> aplicación es de solo lectura, funciona con Ranger publicado mediante Knox,
+> permite configurar las conexiones desde la web y está preparada para
+> convertirse en un Applied ML Prototype (AMP) en el siguiente paso.
+
+---
+
+## 1. Objetivo
+
+Apache Ranger conserva la evidencia de quién accede a los datos, qué servicio
+utiliza, qué recurso solicita, desde qué IP realiza la petición y si el acceso
+es permitido o denegado. Este proyecto transforma esa evidencia técnica en:
+
+- indicadores operativos de accesos permitidos y denegados;
+- evolución temporal, rankings y distribuciones;
+- análisis por usuario, servicio, recurso, operación e IP;
+- visualización geográfica sin enviar direcciones IP a servicios externos;
+- consulta en lenguaje natural mediante un modelo desplegado en Cloudera;
+- herramientas MCP de gobierno para agentes externos autorizados.
+
+La aplicación **no sustituye a Apache Ranger** y no modifica políticas. Los
+clientes de Ranger, Solr y MCP están diseñados para operaciones de lectura.
+
+## 2. Tecnologías y versiones
+
+| Capa | Tecnología | Versión o requisito |
+|---|---|---|
+| Runtime CML | Python | **3.10 compatible**; Python 3.11 también compatible |
+| API | FastAPI | `0.138.2` |
+| Servidor ASGI | Uvicorn | `0.38.0` |
+| Configuración | Pydantic Settings | `2.12.0` |
+| HTTP | Requests | `2.32.3` |
+| MCP | MCP Python SDK | `>=1.27,<2` |
+| Interfaz | React + Vite | bundle compilado incluido en `frontend/dist` |
+| Gráficas | Recharts | instalado por `frontend/package-lock.json` |
+| Mapas | Leaflet + React Leaflet | instalado por `frontend/package-lock.json` |
+| Node.js | Solo para recompilar React | Node.js 20 o superior; no es necesario si `frontend/dist` existe |
+
+### Python 3.10 o 3.11
+
+El runtime objetivo de CML puede ser Python 3.10. No se utilizan características
+exclusivas de Python 3.11. También se puede seleccionar Python 3.11 si está
+disponible en el workspace. Para reproducibilidad, el primer AMP utilizará
+Python 3.10 como línea base.
+
+## 3. Identidad visual Cloudera
+
+La interfaz utiliza la paleta corporativa acordada:
+
+| Color | Hexadecimal | Uso |
+|---|---:|---|
+| <span style="display:inline-block;width:18px;height:18px;background:#FF550D;border-radius:4px"></span> Cloudera Orange | `#FF550D` | acciones principales, riesgo y acentos |
+| <span style="display:inline-block;width:18px;height:18px;background:#120046;border-radius:4px"></span> Twilight | `#120046` | títulos, navegación y fondos de alto contraste |
+| <span style="display:inline-block;width:18px;height:18px;background:#5555F9;border-radius:4px"></span> Blue Nova | `#5555F9` | actividad, controles y estados informativos |
+| <span style="display:inline-block;width:18px;height:18px;background:#CEDBE4;border:1px solid #999;border-radius:4px"></span> Pewter | `#CEDBE4` | bordes, superficies y fondos secundarios |
+| Blanco | `#FFFFFF` | limpieza visual y contraste |
+| Negro | `#000000` | texto principal |
+
+El recurso principal es
+[`topo_ranger_apache.png`](./topo_ranger_apache.png): el emblema de Apache
+Ranger destaca sobre un centro de operaciones con pantallas aclaradas. Las
+tarjetas de servicio incluyen además los logos locales de Apache Atlas, Apache
+Hive y Apache Hadoop/HDFS.
+
+## 4. Arquitectura general
+
+```mermaid
+%%{init: {"theme": "base", "themeVariables": {
+  "primaryColor": "#CEDBE4",
+  "primaryTextColor": "#120046",
+  "primaryBorderColor": "#5555F9",
+  "lineColor": "#5555F9",
+  "secondaryColor": "#FFFFFF",
+  "tertiaryColor": "#FF550D"
+}}}%%
+flowchart LR
+    U["Usuario CML"] -->|"HTTPS terminado por CML"| P["Proxy de Web Apps CML"]
+    P -->|"127.0.0.1 : CDSW_APP_PORT"| API["FastAPI + Uvicorn"]
+    API --> UI["React compilado"]
+    API --> GOV["Analytics determinista"]
+    API --> GEO["SQLite geográfico local"]
+    API --> LOG["Bitácora JSONL"]
+
+    API -->|"GET + Basic/Bearer"| KNOX["Knox Gateway"]
+    KNOX --> RANGER["Apache Ranger API"]
+
+    API -.->|"opcional: GET + SPNEGO"| SOLR["Solr ranger_audits"]
+    API -.->|"opcional: kinit"| KDC["KDC Kerberos"]
+
+    API -->|"OpenAI-compatible API"| MODEL["Modelo servido en Cloudera"]
+    JWT["/tmp/jwt o CDP token"] --> MODEL
+
+    MCP["Servidor FastMCP separado"] --> GOV
+    MCP -->|"mismo cliente y filtros"| RANGER
+    AGENT["Agente MCP autorizado"] <-->|"stdio / Streamable HTTP"| MCP
+```
+
+### 4.1 Frontera de confianza
+
+FastAPI es el Backend for Frontend. El navegador nunca recibe:
+
+- contraseñas de Ranger;
+- tokens de Ranger;
+- CDP tokens;
+- API keys del modelo;
+- contraseñas o keytabs Kerberos.
+
+React recibe únicamente configuración pública, estados de conexión y datos
+agregados. Los secretos permanecen en memoria del proceso y los campos se
+vuelven a mostrar vacíos al abrir Configuración. Un campo secreto vacío durante
+una actualización conserva el valor previamente almacenado.
+
+### 4.2 Fuentes de auditoría
+
+La fuente predeterminada es **Ranger mediante Knox**, adecuada para Cloudera.
+La aplicación llama a:
+
+```text
+GET {RANGER_URL}/service/xaudit/access_audit
+GET {RANGER_URL}/service/public/v2/api/policy
+```
+
+Como alternativa avanzada se puede seleccionar **Solr directo**:
+
+```text
+GET https://{SOLR_SERVER}:{SOLR_PORT}/solr/{SOLR_COLLECTION}/select
+```
+
+Kerberos está desactivado por defecto. Solo se ejecuta `kinit` y se añade
+`curl --negotiate` cuando el interruptor Kerberos está activado.
+
+### 4.3 Modelo LLM
+
+El cliente utiliza el contrato compatible con OpenAI:
+
+```text
+POST {AI_GATEWAY_API_URL}/chat/completions
+```
+
+La credencial se selecciona en este orden:
+
+1. CDP token introducido expresamente en la web;
+2. `access_token` del fichero `/tmp/jwt` de la sesión CML;
+3. API key introducida manualmente;
+4. ninguna credencial.
+
+El modelo predeterminado es:
+
+```text
+nvidia/nemotron-3-nano
+```
+
+La comprobación inicial envía:
+
+```json
+{
+  "model": "nvidia/nemotron-3-nano",
+  "messages": [{"role": "user", "content": "Responde únicamente OK"}],
+  "temperature": 0.2,
+  "top_p": 0.7,
+  "max_tokens": 64,
+  "stream": true
+}
+```
+
+Se aceptan respuestas SSE y respuestas JSON compatibles. Si no aparece texto,
+el diagnóstico informa del tipo de contenido, número de eventos, claves
+recibidas, `finish_reason` y fragmentos de razonamiento, sin mostrar el token.
+
+## 5. Arranque autocontenido en CML
+
+CML permite indicar un único fichero Python. El fichero es:
 
 ```text
 start.py
 ```
 
-CML ejecutará `python start.py`. Ese único proceso instala `requirements.txt`,
-reutiliza el bundle React incluido (o lo compila si falta) y publica FastAPI en
-`127.0.0.1:$CDSW_APP_PORT`. No se deben configurar certificados en Uvicorn:
-el proxy de Cloudera termina HTTPS.
-
-Al entrar, el botón **Configuración** permite indicar la URI y credencial del
-modelo, la URI/autenticación de Ranger a través de Knox y, opcionalmente, un
-Solr directo. Los secretos se conservan solo en memoria y deben volver a
-introducirse después de reiniciar la Web App. Si no se configura
-`APP_AUTH_PASSWORD_HASH`, la aplicación confía en el control de acceso de CML;
-si se configura, mantiene además el login local.
-
-No copies tokens a `.env`, Git, documentación ni capturas. Utiliza variables de
-entorno de CML o introdúcelos en el panel después del arranque.
-
-![Centro de operaciones Ranger Intelligence con los agentes topo](./topo_ranger.PNG)
-
-Plataforma de observabilidad y gobierno para Apache Ranger, preparada para desplegarse como aplicación en Cloudera AI Workbench. Combina una visión ejecutiva de KPIs, trazabilidad de accesos, geolocalización y consultas en lenguaje natural sobre un perímetro estrictamente de solo lectura.
-
-> Estado: MVP funcional, con interfaz “Cristal orgánico” y acceso a Solr
-> Kerberizado validado. No modifica políticas de Ranger. Las credenciales
-> permanecen en FastAPI y nunca llegan al navegador ni al modelo.
-
-La aplicación incorpora autenticación local mediante contraseña scrypt y sesión firmada en cookie `HttpOnly`. Todo el acceso web se sirve por HTTPS; en desarrollo se utiliza un certificado autofirmado.
-
-## Vista de la aplicación
-
-![Dashboard Ranger Intelligence con diseño Cristal orgánico](./docs/dashboard-cristal-organico.png)
-
-La captura corresponde a la aplicación real autenticada, con auditorías
-obtenidas desde Solr y una ventana de seis meses. Los datos son dinámicos y la
-imagen solo documenta la composición visual.
-
-## 1. Propósito de gobierno
-
-Apache Ranger conserva la evidencia operativa: quién accedió, a qué activo, desde dónde, mediante qué servicio y con qué decisión. Este proyecto convierte esa evidencia técnica en tres vistas complementarias:
-
-1. **Visión ejecutiva:** indicadores OK/KO para última hora, hoy y muestra seleccionada.
-2. **Visión operativa:** usuarios, servicios, recursos, IP, operaciones, políticas y últimos eventos.
-3. **Visión semántica:** preguntas en español y herramientas MCP gobernadas para agentes externos.
-
-El producto no sustituye a Ranger. Actúa como una capa de lectura, interpretación y rendición de cuentas.
-
-## 2. Infografía del flujo de datos
+El proceso completo es:
 
 ```mermaid
-flowchart LR
-    P["Plugins Ranger<br/>HDFS · Hive · Atlas · Knox"] -->|"eventos de auditoría"| S["Solr ranger_audits<br/>fuente de evidencia"]
-    KD["KDC · base1<br/>MOLE4.LOCAL"] -->|"TGT Kerberos"| A["FastAPI<br/>frontera de confianza"]
-    S -->|"HTTPS + SPNEGO<br/>fq=-reqUser:(...)"| A
-    R["Ranger Admin"] -->|"GET policy"| A
-    A --> F["Filtro compensatorio<br/>usuarios técnicos"]
-    F --> C["Caché 120 s<br/>periodo + muestra + filtro"]
-    C --> K["Motor KPI<br/>métricas explicables"]
-    C --> N["Motor semántico<br/>intenciones permitidas"]
-    N --> G["AI Gateway / LiteLLM<br/>topito · qwen-local"]
-    C --> M["MCP Ranger<br/>tools de solo lectura"]
-    K --> W["Dashboard React"]
-    G --> W
-    W --> U["Responsable de gobierno<br/>o seguridad"]
-    N --> L["Bitácora JSONL"]
-    M --> X["Agente LLM autorizado"]
+%%{init: {"theme": "base", "themeVariables": {
+  "primaryColor": "#FFFFFF",
+  "primaryTextColor": "#120046",
+  "primaryBorderColor": "#CEDBE4",
+  "lineColor": "#5555F9",
+  "tertiaryColor": "#FF550D"
+}}}%%
+sequenceDiagram
+    participant CML
+    participant Start as start.py
+    participant Pip
+    participant Vite
+    participant Uvicorn
+
+    CML->>Start: ejecuta el script
+    Start->>Start: localiza la raíz del proyecto
+    Start->>Pip: python -m pip install -r requirements.txt
+    alt frontend/dist no existe
+        Start->>Vite: npm install
+        Start->>Vite: npm run build
+    end
+    Start->>Uvicorn: nuevo subproceso
+    Uvicorn->>Uvicorn: host 127.0.0.1
+    Uvicorn->>Uvicorn: puerto CDSW_APP_PORT
 ```
 
-La separación entre extracción, cálculo y presentación permite demostrar de dónde sale cada cifra. Es una característica de gobierno, no solo una decisión técnica.
+### Por qué se usa un subproceso
 
-## 3. Funcionalidad
-
-### 3.1 Dashboard
-
-- Ventanas temporales: 24 horas, 7 días, 30 días, 3 meses y 6 meses.
-- Muestra configurable en web: 1.000, 5.000, 10.000, 30.000, 50.000 o 100.000 eventos.
-- Exclusión activable de usuarios internos.
-- KPIs OK/KO para última hora, hoy y muestra.
-- Evolución temporal y distribución permitidos/denegados.
-- Actividad por identidad mediante ranking proporcional, cuota sobre el total y
-  degradado de intensidad.
-- Identidades con mayor riesgo, priorizadas por volumen relativo de
-  denegaciones.
-- Widgets independientes de recursos por servicio, cada uno con gráfica de
-  toro, total y ranking.
-- Widgets independientes de recursos por usuario. Cada entrada muestra
-  **servicio + recurso + base de datos/ruta**.
-- Categoría `Otros` en los toros para mantener visible el denominador completo
-  aunque el listado solo muestre los recursos principales.
-- IP con más denegaciones.
-- Últimos 100 accesos permitidos y últimos 100 denegados.
-- Inventario y señales básicas de riesgo en políticas.
-- Consulta de la bitácora del chat.
-
-### 3.2 Diseño “Cristal orgánico”
-
-La interfaz adopta un sistema visual claro inspirado en superficies líquidas:
-
-- fondo blanco con ondas, halos acuosos y profundidad suave;
-- paneles translúcidos con refracción contenida y contraste accesible;
-- geometría orgánica aplicada a tarjetas, controles y estados;
-- logo original integrado en una cápsula líquida, sin alterar la ilustración;
-- turquesa y azul para actividad permitida;
-- coral y magenta reservados para denegaciones y riesgo;
-- diseño adaptable: cuatro widgets por fila en escritorio, dos en resoluciones
-  intermedias y uno en móvil.
-
-El color nunca es el único portador de significado: totales, porcentajes,
-posición y etiquetas permanecen visibles.
-
-### 3.3 Mapa
-
-- Las IP públicas se resuelven localmente con un catálogo IPv4 convertido a SQLite.
-- Ninguna IP se envía a un servicio externo de geolocalización.
-- Las IP privadas se agrupan en Calle Embajadores 181, Madrid.
-- El mapa encuadra todos los puntos con aproximadamente 5 km de margen sobre los extremos.
-
-### 3.4 Lenguaje natural
-
-El chat no convierte texto libre en URLs, SQL ni acciones administrativas. Clasifica la pregunta dentro de un catálogo permitido y responde con:
-
-- una conclusión textual;
-- una tabla cuando aporta evidencia;
-- una gráfica cuando facilita la comparación.
-
-Ejemplos:
-
-- `Desglosa los accesos por usuario.`
-- `Usuarios que han accedido y a qué servicio.`
-- `¿Qué recursos fueron los más solicitados?`
-- `Dime los accesos de la última hora.`
-- `Muéstrame políticas con comodines.`
-- `¿Qué APIs puedes llamar?`
-
-## 4. Visión de KPIs
-
-| Dominio | KPI | Interpretación de gobierno |
-|---|---|---|
-| Acceso | OK/KO última hora | Pulso operativo y detección temprana |
-| Acceso | OK/KO hoy | Situación diaria para operaciones |
-| Acceso | OK/KO muestra | Postura del periodo seleccionado |
-| Identidad | Actividad por identidad | Ranking, cuota y concentración de uso |
-| Identidad | Identidades con mayor riesgo | Prioridad relativa por denegaciones |
-| Activo | Recursos por servicio | Activos críticos dentro de cada repositorio |
-| Activo | Recursos por usuario | Relación identidad-servicio-activo y concentración de acceso |
-| Servicio | Accesos por repositorio | Distribución de carga y superficie gobernada |
-| Red | IP con denegaciones | Investigación de origen y patrones anómalos |
-| Política | Políticas amplias | Comodines, exposición pública o delegación administrativa |
-
-### Alcance y denominadores
-
-Toda métrica se calcula sobre una **muestra explícita**, no necesariamente sobre el universo histórico. El pie de la web muestra el tamaño solicitado y la respuesta API incluye `sampleSize`. Aumentar la muestra mejora cobertura, pero incrementa el coste de consulta y transferencia desde Solr.
-
-## 5. Arquitectura
-
-```mermaid
-flowchart TB
-    subgraph Browser["Navegador"]
-        UI["React · Cristal orgánico<br/>Recharts + Leaflet"]
-    end
-
-    subgraph App["Aplicación Cloudera AI"]
-        API["FastAPI /api"]
-        GOV["Analytics de gobierno"]
-        CHAT["Intérprete seguro"]
-        GATEWAY["Cliente AI Gateway"]
-        GEO["Índice SQLite IPv4"]
-        AUDIT["Bitácora JSONL"]
-        MCPS["FastMCP server"]
-        API --> GOV
-        API --> CHAT
-        CHAT --> GATEWAY
-        API --> GEO
-        CHAT --> AUDIT
-        MCPS --> GOV
-    end
-
-    subgraph Solr["Solr Kerberizado · base2"]
-        XA["/solr/ranger_audits/select"]
-    end
-
-    subgraph Kerberos["Kerberos · base1"]
-        KDC["KDC MOLE4.LOCAL"]
-    end
-
-    subgraph Ranger["Apache Ranger Admin · base3"]
-        PO["/service/public/v2/api/policy"]
-    end
-
-    subgraph AI["AI Gateway / LiteLLM"]
-        TOPITO["topito → OpenAI"]
-        QWEN["qwen-local → Ollama qwen3.5:9b"]
-    end
-
-    UI <-->|"HTTPS / JSON"| API
-    API -->|"kinit · TGT"| KDC
-    API -->|"SPNEGO · GET"| XA
-    API -->|"Basic Auth · GET"| PO
-    GATEWAY -->|"API compatible con OpenAI"| TOPITO
-    GATEWAY -->|"API compatible con OpenAI"| QWEN
-    AGENT["Cliente MCP / LLM"] <-->|"stdio o Streamable HTTP"| MCPS
-```
-
-### Decisiones principales
-
-- **Backend for Frontend:** React solo llama a FastAPI; no conoce credenciales Ranger.
-- **Solo lectura por construcción:** el cliente únicamente implementa GET de auditorías y políticas.
-- **Defensa en profundidad:** el filtro negativo `fq=-reqUser:(...)` se ejecuta en Solr y vuelve a comprobarse en FastAPI.
-- **Cálculos puros:** `analytics.py` no hace red, facilitando revisión y pruebas.
-- **Despliegue único:** React se compila y FastAPI sirve el resultado.
-- **MCP cerrado:** las tools exponen casos de gobierno concretos, no un proxy HTTP genérico.
-
-## 6. MCP para hablar con Ranger
-
-El servidor MCP está en `backend/mcp_server.py` y utiliza el SDK oficial de Python. Expone exclusivamente:
-
-| Tool MCP | Función | Escritura |
-|---|---|---|
-| `ranger_access_kpis` | KPIs, evolución, usuarios y servicios | No |
-| `ranger_top_resources` | Recursos con servicio y contexto | No |
-| `ranger_recent_denials` | Denegaciones recientes para investigación | No |
-| `ranger_policy_inventory` | Inventario de políticas | No |
-
-Arranque por `stdio`:
-
-```bash
-python -m backend.mcp_server
-```
-
-Arranque con Streamable HTTP:
-
-```bash
-MCP_TRANSPORT=streamable-http python -m backend.mcp_server
-```
-
-El SDK oficial recomienda Streamable HTTP para producción y `stdio` resulta práctico para desarrollo local. Antes de exponer MCP en red debe añadirse autenticación corporativa y autorización por identidad; el hecho de que una tool sea de lectura no significa que sus datos carezcan de sensibilidad.
-
-## 7. APIs
-
-### Fuentes de gobierno utilizadas
+Algunas Web Apps de CML ejecutan el fichero como celdas dentro de IPython. En
+ese contexto ya existe un bucle `asyncio`; llamar directamente a
+`uvicorn.run()` produciría:
 
 ```text
-GET https://base2.mole4.local:8995/solr/ranger_audits/select
-GET /service/public/v2/api/policy
+RuntimeError: asyncio.run() cannot be called from a running event loop
 ```
 
-La auditoría se obtiene de Solr mediante Kerberos/SPNEGO (`kinit` y `curl --negotiate`). Las políticas continúan leyéndose desde Ranger Admin con Basic Auth.
+`start.py` inicia Uvicorn mediante `subprocess.run`, aislando su bucle de
+eventos.
 
-Parámetros Solr relevantes:
+### Detección de la carpeta raíz
 
-| Parámetro | Uso |
+El proyecto puede llegar a CML de dos maneras:
+
+- clonado desde Git, con los ficheros directamente en `CDSW_PROJECT_HOME`;
+- cargado como carpeta, creando
+  `CDSW_PROJECT_HOME/topo-ranger-kpi-agent-cloudera-amp/`.
+
+`find_project_root()` comprueba ambos formatos y hasta dos niveles de
+subcarpetas. La raíz válida debe contener:
+
+```text
+requirements.txt
+backend/main.py
+frontend/
+```
+
+### Host y puerto
+
+La aplicación escucha obligatoriamente en:
+
+```text
+host = 127.0.0.1
+port = CDSW_APP_PORT
+```
+
+Si `CDSW_APP_PORT` no existe, se utiliza `APP_PORT` y finalmente `8000`.
+No se configura TLS en Uvicorn dentro de CML: el proxy de Cloudera termina
+HTTPS.
+
+## 6. Despliegue manual como Web App CML
+
+### 6.1 Requisitos
+
+- Proyecto CML con permiso para crear una Web App.
+- Runtime Python 3.10 o 3.11.
+- Recursos recomendados para la primera prueba: 4 CPU y 8 GiB de memoria.
+- Acceso de red desde el runtime hacia Knox/Ranger y el endpoint del modelo.
+- Node.js únicamente si se elimina `frontend/dist`; el repositorio ya incluye
+  el frontend compilado.
+- `curl`, `kinit` y `klist` solo si se activa Solr directo con Kerberos.
+
+### 6.2 Procedimiento
+
+1. Importar el repositorio en CML o subir la carpeta completa.
+2. Crear una nueva **Application / Web App**.
+3. Seleccionar Python 3.10 o Python 3.11.
+4. Indicar `start.py` como script.
+5. Asignar 4 CPU y 8 GiB de memoria.
+6. Iniciar la aplicación.
+7. Abrir la URL publicada por CML.
+8. Entrar en **Configuración**, completar conexiones y pulsar
+   **Guardar y aplicar**.
+9. Revisar los semáforos `API RANGER`, `SOLR` y `MODELO`.
+
+En cada reinicio del contenedor se reinstalan las dependencias Python antes de
+levantar el servidor. Esto responde al modelo efímero de los runtimes CML.
+
+## 7. Configuración desde la interfaz
+
+Cada parámetro dispone de un icono de interrogación con descripción y ejemplo.
+
+### 7.1 Apache Ranger / Knox
+
+| Campo | Descripción |
 |---|---|
-| `q=*:*` | Universo inicial de auditorías |
-| `fq=evtTime:[inicio TO fin]` | Acotar el periodo |
-| `fq=-reqUser:(...)` | Excluir cuentas técnicas en origen |
-| `fq=repo:"servicio"` | Filtrar un repositorio cuando procede |
-| `start`, `rows` | Paginar en bloques de hasta 10.000 |
-| `sort=evtTime desc` | Recuperar primero los eventos recientes |
+| URI de Ranger | URL base de Ranger publicada por Knox; la aplicación añade las rutas REST |
+| Autenticación | `basic`, `bearer` o `none` |
+| Usuario | usuario técnico o usuario de workload |
+| Contraseña | valor de `WORKLOAD_PASSWORD`; se genera en **User Settings** de Cloudera |
+| Token Ranger | token Bearer aceptado por Knox/Ranger |
 
-### APIs FastAPI
-
-| Método | Ruta | Función |
-|---|---|---|
-| POST | `/api/auth/login` | Valida credenciales y crea la cookie segura |
-| GET | `/api/auth/session` | Comprueba la sesión activa |
-| POST | `/api/auth/logout` | Elimina la cookie de sesión |
-| GET | `/api/config` | Aliases LLM seleccionables publicados por AI Gateway |
-| GET | `/api/health` | Conectividad, servicios y estado geográfico |
-| GET | `/api/dashboard` | KPIs y tablas gobernadas |
-| GET | `/api/map` | Puntos geográficos agregados |
-| POST | `/api/chat` | Pregunta semántica permitida |
-| GET | `/api/logs` | Bitácora reciente del chat |
-| POST | `/api/admin/build-geo-index` | Construcción controlada del índice local |
-| GET | `/docs` | OpenAPI interactivo de FastAPI |
-
-## 8. Estructura del repositorio
+Ejemplo de URL:
 
 ```text
-topo-ranger-kpi-agent/
-├── backend/
-│   ├── analytics.py       # KPIs, recursos gobernados y filas de evidencia
-│   ├── audit_log.py       # bitácora append-only JSONL
-│   ├── chat.py            # contexto e intenciones de lenguaje natural
-│   ├── config.py          # configuración externalizada
-│   ├── geolocation.py     # índice y resolución IPv4
-│   ├── llm.py             # adaptador único a AI Gateway/LiteLLM
-│   ├── main.py            # FastAPI, caché y entrega del frontend
-│   ├── mcp_server.py      # tools MCP de solo lectura
-│   ├── ranger.py          # políticas desde Ranger Admin
-│   └── solr.py            # auditoría Solr con Kerberos/SPNEGO
-├── frontend/
-│   ├── src/main.jsx       # dashboard, chat, tablas y mapa
-│   ├── src/styles.css     # sistema visual responsive
-│   └── vite.config.js     # build y proxy de desarrollo
-├── scripts/
-│   └── build_geo_index.py # CSV IPv4 → SQLite indexado
-├── tests/
-│   └── test_analytics.py  # pruebas unitarias y de contrato
-├── docs/
-│   └── dashboard-cristal-organico.png # captura de la interfaz
-├── Dockerfile             # build multi-stage Node → Python
-├── start.py               # arranque local/Cloudera
-├── requirements.txt
-├── litellm-config.yaml.example # catálogo de modelos del gateway
-└── .env.example
+https://gateway.example.cloudera.site/environment/cdp-proxy-token/ranger
 ```
 
-Artefactos no versionados:
+### 7.2 Auditoría
 
-- `.env`: secretos locales.
-- `data/geolocation.sqlite`: índice derivado.
-- `data/chat_audit.jsonl`: evidencia operativa.
-- `data/krb5cc_ranger_solr`: credential cache Kerberos temporal.
-- `data/krb5_ranger_solr.conf`: configuración Kerberos privada generada por la aplicación.
-- `geolocationDatabaseIPv4.csv`: fuente geográfica de gran tamaño.
+| Campo | Descripción |
+|---|---|
+| Origen | API Ranger vía Knox o Solr directo |
+| Servidor Solr | DNS/IP sin protocolo |
+| Puerto | puerto HTTPS de Solr |
+| Colección | normalmente `ranger_audits` |
 
-## 9. Configuración
+Aunque Solr no esté disponible, la aplicación puede trabajar con la API de
+Ranger cuando el origen seleccionado es `ranger`.
 
-Crear `.env` a partir de `.env.example`:
+### 7.3 Kerberos opcional
+
+Para Knox, el interruptor debe permanecer **apagado**. Al activarlo se solicitan:
+
+- usuario;
+- realm;
+- servidor KDC;
+- admin server;
+- contraseña o ruta de keytab;
+- ruta de caché de credenciales;
+- ruta del `krb5.conf` privado.
+
+Con contraseña:
+
+```text
+kinit -c {KERBEROS_CCACHE} usuario@REALM
+```
+
+Con keytab:
+
+```text
+kinit -kt {KERBEROS_KEYTAB} -c {KERBEROS_CCACHE} usuario@REALM
+```
+
+La contraseña se entrega por entrada estándar y no forma parte del comando.
+
+### 7.4 Modelo
+
+| Campo | Descripción |
+|---|---|
+| URI compatible con OpenAI | base URL del endpoint; se añade `/chat/completions` |
+| API key | credencial manual compatible con el endpoint |
+| CDP token | token de CDP, con prioridad sobre la API key |
+| Usar `/tmp/jwt` | lee automáticamente el token temporal de CML |
+| Modelos | identificadores separados por comas |
+| Modelo predeterminado | debe existir en la lista anterior |
+
+## 8. Variables de entorno
+
+La web permite modificar los campos operativos en memoria. Para establecer
+valores al arrancar se pueden usar variables del proyecto CML:
 
 ```env
-RANGER_URL=https://base3.mole4.local:6182
-RANGER_USER=admin
-RANGER_PASSWORD=change-me
+RANGER_URL=https://gateway.example.cloudera.site/environment/cdp-proxy-token/ranger
+RANGER_AUTH_TYPE=basic
+RANGER_USER=usuario-workload
+RANGER_PASSWORD=
+RANGER_TOKEN=
 RANGER_VERIFY_SSL=false
-RANGER_SERVICES=cm_hdfs,cm_knox,cm_atlas,Hadoop SQL
-RANGER_AUDIT_PAGE_SIZE=5000
-RANGER_TIMEOUT_SECONDS=60
+RANGER_SERVICES=cm_hdfs,cm_hive,cm_atlas,cm_knox
 RANGER_EXCLUDE_USERS=hdfs,hive,impala,kafka,nifi,spark
-AUDIT_SOURCE=solr
-SOLR_SERVER=base2.mole4.local
+
+AUDIT_SOURCE=ranger
+SOLR_SERVER=
 SOLR_PORT=8995
 SOLR_COLLECTION=ranger_audits
-SOLR_VERIFY_SSL=false
-SOLR_TIMEOUT_SECONDS=90
-KERBEROS_USER=smerchan
-KERBEROS_REALM=MOLE4.LOCAL
-KERBEROS_KDC=base1.mole4.local
-KERBEROS_ADMIN_SERVER=base1.mole4.local
-KERBEROS_PASSWORD=replace-with-kerberos-password
+
+KERBEROS_ENABLED=false
+KERBEROS_USER=
+KERBEROS_REALM=
+KERBEROS_KDC=
+KERBEROS_ADMIN_SERVER=
+KERBEROS_PASSWORD=
+KERBEROS_KEYTAB=
 KERBEROS_CCACHE=data/krb5cc_ranger_solr
 KERBEROS_CONFIG_FILE=data/krb5_ranger_solr.conf
-AUDIT_LOG_PATH=data/chat_audit.jsonl
-GEO_CSV_PATH=geolocationDatabaseIPv4.csv
-GEO_DB_PATH=data/geolocation.sqlite
-CORS_ORIGINS=https://localhost:5173
-APP_AUTH_USERNAME=smerchan
-APP_AUTH_PASSWORD_HASH=scrypt$16384$8$1$replace-salt$replace-hash
-APP_SESSION_SECRET=replace-with-a-long-random-secret
-APP_SESSION_HOURS=8
-APP_COOKIE_NAME=ranger_session
-APP_COOKIE_SECURE=true
-SSL_CERTFILE=certs/localhost.crt
-SSL_KEYFILE=certs/localhost.key
-SERVER_IP=192.168.1.98
-AI_GATEWAY_API_URL=http://127.0.0.1:4000/v1
-AI_GATEWAY_TOKEN=replace-with-litellm-master-key
-AI_GATEWAY_MODELS=topito,qwen-local
-AI_GATEWAY_DEFAULT_MODEL=topito
-AI_GATEWAY_TIMEOUT_SECONDS=90
+
+AI_GATEWAY_API_URL=https://ml.example.cloudera.site/namespaces/serving-default/endpoints/my-model/v1
+AI_GATEWAY_TOKEN=
+CDP_TOKEN=
+USE_CML_JWT=true
+CML_JWT_PATH=/tmp/jwt
+AI_GATEWAY_MODELS=nvidia/nemotron-3-nano
+AI_GATEWAY_DEFAULT_MODEL=nvidia/nemotron-3-nano
+
+SERVER_IP=127.0.0.1
+APP_PORT=8000
 ```
 
-En producción debe utilizarse un gestor de secretos. `RANGER_VERIFY_SSL=false` solo es aceptable en laboratorio con certificado interno no confiable; el objetivo productivo debe ser `true` con la CA corporativa instalada.
+No se deben versionar `.env`, `.env.cml`, tokens, contraseñas, keytabs ni
+cachés Kerberos. Ambos ficheros `.env` están incluidos en `.gitignore`.
 
-### Kerberos y Solr
+## 9. Autenticación de usuarios de la Web App
 
-Al arrancar la primera consulta, el backend genera en
-`data/krb5_ranger_solr.conf` una configuración Kerberos privada equivalente a
-la del clúster: realm `MOLE4.LOCAL` y KDC `base1.mole4.local`. Tanto `klist`
-como `kinit` y `curl --negotiate` reciben `KRB5_CONFIG` y `KRB5CCNAME`, por lo
-que no dependen del `/etc/krb5.conf` del portátil. Si no existe un TGT válido
-ejecuta:
+El backend busca primero la identidad propagada por Cloudera en cabeceras como
+`REMOTE-USER`. Cuando existe:
 
-```bash
-KRB5_CONFIG=data/krb5_ranger_solr.conf \
-kinit -c data/krb5cc_ranger_solr smerchan@MOLE4.LOCAL
-```
+- no se presenta el formulario local;
+- la interfaz muestra `Cloudera: nombre-usuario`;
+- el acceso efectivo sigue dependiendo de los permisos de la Web App CML.
 
-La contraseña se entrega por entrada estándar desde `KERBEROS_PASSWORD`; no forma parte del comando ni se registra. `curl --negotiate -u :` reutiliza ese cache para SPNEGO. En producción es preferible sustituir la contraseña por un keytab limitado y un principal de servicio dedicado.
+Si no se detecta una identidad de Cloudera, se utiliza el login local solo
+cuando `APP_AUTH_PASSWORD_HASH` está configurado. La sesión local usa:
 
-El flujo de autenticación y consulta es:
+- hash scrypt;
+- cookie firmada `HttpOnly`;
+- `SameSite=Strict`;
+- duración configurable;
+- limitación de intentos.
 
-1. FastAPI genera el `krb5.conf` privado sin modificar `/etc/krb5.conf`.
-2. `klist` comprueba el cache dedicado.
-3. Si no existe un TGT válido, `kinit` autentica
-   `smerchan@MOLE4.LOCAL` contra `base1.mole4.local`.
-4. `curl --negotiate` presenta el ticket al servicio HTTP de Solr en
-   `base2.mole4.local:8995`.
-5. Solr devuelve JSON y el adaptador traduce `reqUser`, `repo`, `cliIP`,
-   `evtTime` y `result` al contrato interno del dashboard.
-
-La lista `RANGER_EXCLUDE_USERS` se convierte en un filtro Solr como:
-
-```text
-fq=-reqUser:(hdfs OR hive OR impala OR kafka OR nifi OR spark OR yarn OR hue)
-```
-
-FastAPI repite la exclusión después de normalizar la respuesta como control compensatorio.
-
-#### Diagnóstico Kerberos
-
-Los errores más habituales y su significado son:
-
-| Error | Causa probable | Comprobación |
-|---|---|---|
-| `Configuration file does not specify default realm` | El proceso no recibió `KRB5_CONFIG` | Comprobar `KERBEROS_CONFIG_FILE` y reiniciar |
-| `Cannot find KDC for realm` | KDC ausente o incorrecto | Debe ser `base1.mole4.local`, no el servidor Solr |
-| `Password incorrect` | Credencial Kerberos incorrecta o caducada | Actualizar `KERBEROS_PASSWORD` solo en `.env` |
-| `curl: (67) Login denied` | No hay TGT válido o SPNEGO no está disponible | Revisar `klist` y que `curl --version` incluya SPNEGO |
-| Timeout al consultar | DNS, red o puerto inaccesible | Verificar acceso a `base1` y `base2:8995` |
-
-Para comprobar manualmente el mismo contexto que usa la aplicación:
-
-```bash
-export KRB5_CONFIG="$PWD/data/krb5_ranger_solr.conf"
-export KRB5CCNAME="FILE:$PWD/data/krb5cc_ranger_solr"
-klist
-curl -k --negotiate -u : \
-  "https://base2.mole4.local:8995/solr/ranger_audits/select?q=*:*&rows=1&wt=json"
-```
-
-Nunca se debe copiar el cache Kerberos, la contraseña o el contenido de `.env`
-a Git, capturas de pantalla o registros de soporte.
-
-### Línea base y rollback
-
-La etiqueta Git `baseline-ranger-api-2026-07-23` conserva el último estado que leía auditorías desde `/service/xaudit/access_audit`. Para inspeccionarlo sin modificar la rama actual:
-
-```bash
-git switch --detach baseline-ranger-api-2026-07-23
-```
-
-## 10. Instalación local
-
-Requisitos:
-
-- Python 3.11 o superior.
-- Node.js 20 o superior para compilar React.
-- Cliente MIT Kerberos (`kinit`, `klist`) y `curl` compilado con SPNEGO.
-- Resolución DNS y conectividad con el KDC `base1.mole4.local`, Solr
-  `base2.mole4.local:8995` y Ranger Admin `base3.mole4.local:6182`.
-
-```bash
-git clone http://nas.mole4.local:8418/smerchan/topo-ranger-kpi-agent.git
-cd topo-ranger-kpi-agent
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-```
-
-Editar `.env` y añadir las credenciales mediante un canal seguro.
-
-### Configurar o cambiar la contraseña
-
-La contraseña distingue mayúsculas y minúsculas. FastAPI no guarda una contraseña en claro: valida el valor de `APP_AUTH_PASSWORD_HASH`.
-
-Para generar un hash sin escribir la contraseña en el historial:
+Generación local del hash:
 
 ```bash
 python -m scripts.hash_password
 ```
 
-El script solicita la contraseña dos veces y devuelve una línea que comienza por `scrypt$`. Copiarla completa a `.env`:
+Para una lista cerrada de administradores deberá añadirse en el siguiente paso
+una allowlist que valide el usuario CML detectado antes de servir la aplicación.
 
-```env
-APP_AUTH_PASSWORD_HASH=scrypt$16384$8$1$...
+## 10. Semáforos y diagnóstico
+
+La esquina inferior muestra tres comprobaciones independientes:
+
+| Semáforo | Comprobación |
+|---|---|
+| API RANGER | llamada real de lectura a auditorías de Ranger |
+| SOLR | consulta `rows=0` a la colección configurada |
+| MODELO | completion mínima compatible con OpenAI |
+
+Se ejecutan:
+
+- al iniciar la interfaz;
+- al pulsar el botón de recarga;
+- después de guardar la configuración.
+
+Al pasar el ratón sobre cada estado se muestra la latencia o el error.
+
+### Diagnóstico de Ranger
+
+Los mensajes distinguen:
+
+1. no se llega a la URL: DNS, red, timeout o SSL;
+2. se llega, pero el usuario/contraseña no son correctos: HTTP 401;
+3. el usuario está autenticado, pero no tiene permisos: HTTP 403;
+4. se llega y la API devuelve otro error HTTP;
+5. HTTP 200 sin JSON: respuesta vacía, HTML o redirección de Knox.
+
+### Diagnóstico del modelo
+
+Un HTTP correcto sin texto puede indicar que el modelo agotó los tokens en
+razonamiento, que devolvió otro esquema o que el proxy no entregó SSE. El
+tooltip incluye estructura segura de la respuesta para diferenciar estos casos.
+
+## 11. Componentes del dashboard
+
+- KPIs permitidos/denegados de última hora, día y muestra.
+- Ventanas de 24 h, 7 días, 30 días, 3 meses y 6 meses.
+- Muestras de 1.000 a 100.000 auditorías.
+- Evolución temporal.
+- Distribución de decisiones.
+- Recursos por servicio y por usuario.
+- Logos automáticos para `cm_atlas`, `cm_hive` y `cm_hdfs`.
+- Actividad y concentración por identidad.
+- identidades con mayor volumen de denegaciones.
+- tabla de recursos utilizados.
+- IP con mayor número de denegaciones.
+- últimos 100 accesos permitidos y denegados.
+- mapa local de IP.
+- chat de gobierno sobre la evidencia.
+- registro de actividad.
+
+Las tablas y gráficas se calculan de forma determinista. El LLM redacta una
+explicación sobre esa evidencia; no calcula los KPIs ni recibe credenciales.
+
+## 12. Flujo de una consulta del dashboard
+
+```mermaid
+%%{init: {"theme": "base", "themeVariables": {
+  "primaryColor": "#CEDBE4",
+  "primaryTextColor": "#120046",
+  "primaryBorderColor": "#5555F9",
+  "lineColor": "#FF550D",
+  "secondaryColor": "#FFFFFF"
+}}}%%
+sequenceDiagram
+    participant B as Navegador
+    participant F as FastAPI
+    participant R as Ranger/Knox
+    participant A as Analytics
+    participant L as Modelo CML
+
+    B->>F: GET /api/dashboard
+    F->>R: GET access_audit y policy
+    R-->>F: JSON de auditorías y políticas
+    F->>F: normalización, filtro y caché
+    F->>A: muestra gobernada
+    A-->>F: KPIs, tablas y gráficas
+    F-->>B: JSON agregado
+
+    B->>F: POST /api/chat
+    F->>A: intención permitida
+    A-->>F: respuesta determinista
+    F->>L: explicación sobre evidencia
+    L-->>F: stream de texto
+    F-->>B: texto + tabla + gráfica
 ```
 
-Reiniciar `python start.py` para cargar el hash nuevo.
+La caché se separa por periodo, tamaño de muestra y filtro de usuarios para
+evitar mezclar universos distintos.
 
-Las cookies creadas anteriormente continúan siendo válidas hasta su caducidad. Para cerrar todas las sesiones activas, generar además un secreto nuevo:
+## 13. API FastAPI
+
+| Método | Ruta | Función |
+|---|---|---|
+| `POST` | `/api/auth/login` | login local de respaldo |
+| `GET` | `/api/auth/session` | identidad CML o sesión local |
+| `POST` | `/api/auth/logout` | cierre de sesión local |
+| `GET` | `/api/health` | salud de la fuente activa |
+| `GET` | `/api/diagnostics` | estados API Ranger, Solr y modelo |
+| `GET` | `/api/config` | configuración pública, nunca secretos |
+| `POST` | `/api/config` | actualiza configuración en memoria |
+| `GET` | `/api/dashboard` | KPIs, tablas y distribuciones |
+| `GET` | `/api/map` | puntos geográficos agregados |
+| `POST` | `/api/chat` | consulta semántica gobernada |
+| `GET` | `/api/logs` | registro reciente |
+| `POST` | `/api/admin/build-geo-index` | construcción del índice IPv4 |
+| `GET` | `/docs` | Swagger protegido |
+| `GET` | `/openapi.json` | contrato OpenAPI protegido |
+
+## 14. MCP: herramientas para agentes
+
+El servidor está en `backend/mcp_server.py` y utiliza `FastMCP`. No se inicia
+automáticamente con la Web App porque CML ejecuta `start.py` como un único
+servidor web. MCP debe desplegarse como proceso o tarea independiente cuando se
+quiera conectar un agente.
+
+### Herramientas expuestas
+
+| Tool | Parámetros principales | Resultado | Escritura |
+|---|---|---|---|
+| `ranger_access_kpis` | periodo, muestra, excluir internos | resumen, timeline, usuarios y servicios | No |
+| `ranger_top_resources` | periodo, muestra, límite | recursos, servicio, contexto y accesos | No |
+| `ranger_recent_denials` | periodo, muestra, límite | denegaciones recientes | No |
+| `ranger_policy_inventory` | servicio opcional | inventario de políticas | No |
+
+### Funcionamiento
+
+1. El cliente MCP solicita una tool.
+2. `_snapshot()` limita la muestra entre 100 y 100.000.
+3. Se reutiliza `load()` de FastAPI.
+4. Se aplican los mismos filtros, caché y clientes que en la web.
+5. `analytics.dashboard()` produce la misma definición de los KPIs.
+6. La tool devuelve JSON estructurado.
+
+No existe una tool que acepte una URL, consulta Solr o acción Ranger
+arbitraria. Esto evita convertir MCP en un proxy administrativo.
+
+El servidor MCP no llama directamente al LLM configurado en la Web App. Su
+responsabilidad es entregar evidencia estructurada al cliente MCP; el agente
+que realiza la llamada decide cómo incorporar esa evidencia a su contexto.
+
+### Ejemplos de llamadas MCP
+
+KPIs de los últimos siete días:
+
+```json
+{
+  "tool": "ranger_access_kpis",
+  "arguments": {
+    "period": "7d",
+    "sample_size": 5000,
+    "exclude_internal": true
+  }
+}
+```
+
+Recursos más utilizados:
+
+```json
+{
+  "tool": "ranger_top_resources",
+  "arguments": {
+    "period": "30d",
+    "sample_size": 10000,
+    "exclude_internal": true,
+    "limit": 20
+  }
+}
+```
+
+Denegaciones recientes:
+
+```json
+{
+  "tool": "ranger_recent_denials",
+  "arguments": {
+    "period": "24h",
+    "sample_size": 5000,
+    "exclude_internal": true,
+    "limit": 50
+  }
+}
+```
+
+Inventario de políticas de HDFS:
+
+```json
+{
+  "tool": "ranger_policy_inventory",
+  "arguments": {
+    "service": "cm_hdfs"
+  }
+}
+```
+
+Forma resumida de la respuesta de KPIs:
+
+```json
+{
+  "scope": {
+    "period": "7d",
+    "sampleSize": 5000,
+    "excludeInternal": true
+  },
+  "summary": {
+    "total": 5000,
+    "allowed": 4800,
+    "denied": 200
+  },
+  "timeline": [],
+  "accessesByUser": [],
+  "serviceDistribution": []
+}
+```
+
+Las cifras anteriores son únicamente un ejemplo de estructura, no datos reales
+del entorno.
+
+### Arranque por stdio
 
 ```bash
-python -c "import secrets; print(secrets.token_urlsafe(48))"
+python -m backend.mcp_server
 ```
 
-Copiarlo a:
+Ejemplo conceptual de configuración de un cliente MCP:
 
-```env
-APP_SESSION_SECRET=valor-generado
+```json
+{
+  "mcpServers": {
+    "ranger-governance": {
+      "command": "python",
+      "args": ["-m", "backend.mcp_server"],
+      "cwd": "/ruta/al/proyecto"
+    }
+  }
+}
 ```
 
-No debe guardarse la contraseña en claro en `.env`, Git, README o logs.
-
-Generar el certificado HTTPS autofirmado:
+### Arranque Streamable HTTP
 
 ```bash
-python -m scripts.generate_self_signed_cert
+MCP_TRANSPORT=streamable-http python -m backend.mcp_server
 ```
 
-El navegador mostrará una advertencia la primera vez porque el certificado no procede de una CA pública. En producción debe reemplazarse por un certificado corporativo o terminar TLS en el proxy de Cloudera.
+Antes de publicar MCP en red se debe añadir autenticación corporativa,
+autorización por usuario, TLS y control de acceso a los datos devueltos.
 
-Si cambia `SERVER_IP`, hay que regenerar el certificado para incluir la nueva IP en su SAN.
+## 15. Geolocalización
 
-### AI Gateway / LiteLLM
-
-La aplicación no contiene clientes directos de OpenAI u Ollama. Siempre llama al endpoint compatible con OpenAI de LiteLLM definido en `AI_GATEWAY_API_URL`. El token permanece en FastAPI y los únicos modelos visibles son los aliases de `AI_GATEWAY_MODELS`.
-
-El fichero [litellm-config.yaml.example](./litellm-config.yaml.example) debe copiarse a la carpeta de configuración del gateway. Publica:
-
-- `topito` → modelo OpenAI principal;
-- `qwen-local` → `ollama/qwen3.5:9b`;
-- `embedding-local` → embeddings BGE-M3 para Milvus;
-- `guardian-seguridad` → Llama Guard.
-
-Arranque orientativo del modelo local y el gateway:
-
-```bash
-ollama run qwen3.5:9b
-litellm --config /ruta/del/gateway/litellm-config.yaml --port 4000
-```
-
-La web obtiene el catálogo desde `/api/config` y permite seleccionar `topito` o `qwen-local`. Tablas y gráficas siguen calculándose de forma determinista; el LLM únicamente redacta la explicación sobre esa evidencia.
-
-### Índice geográfico
+El CSV IPv4 se transforma a SQLite:
 
 ```bash
 python -m scripts.build_geo_index
 ```
 
-El CSV contiene aproximadamente 2,4 millones de rangos. Se transforma una vez a SQLite para evitar recorrerlo en cada petición.
+Ventajas:
 
-## 11. Ejecución
+- no se envían IP a servicios externos;
+- la consulta es local;
+- el fichero grande no se recorre en cada petición;
+- las IP privadas pueden agruparse en una ubicación organizativa acordada.
 
-### Arranque habitual: un único servidor
+El CSV original y la base SQLite son artefactos grandes. Para las primeras
+pruebas CML pueden omitirse si no se necesita el mapa.
+
+## 16. Estructura del proyecto
+
+```text
+topo-ranger-kpi-agent-cloudera-amp/
+├── backend/
+│   ├── analytics.py       # KPIs y agregaciones deterministas
+│   ├── audit_log.py       # bitácora JSONL
+│   ├── auth.py            # identidad CML y sesión local
+│   ├── chat.py            # intenciones permitidas
+│   ├── config.py          # configuración CML
+│   ├── geolocation.py     # índice IPv4
+│   ├── llm.py             # cliente del modelo compatible con OpenAI
+│   ├── main.py            # FastAPI, API y frontend
+│   ├── mcp_server.py      # servidor MCP de solo lectura
+│   ├── ranger.py          # cliente Ranger/Knox
+│   └── solr.py            # cliente Solr y Kerberos opcional
+├── frontend/
+│   ├── dist/              # frontend compilado usado por CML
+│   └── src/
+│       ├── assets/        # logos Apache incluidos localmente
+│       ├── main.jsx       # interfaz React
+│       └── styles.css     # paleta Cloudera y responsive
+├── scripts/
+│   ├── build_geo_index.py
+│   ├── generate_self_signed_cert.py
+│   └── hash_password.py
+├── tests/                 # pruebas de analytics, auth y conexiones
+├── start.py               # único script de la Web App CML
+├── requirements.txt
+├── .env.example
+├── Dockerfile
+└── topo_ranger_apache.png
+```
+
+## 17. Desarrollo y pruebas locales
 
 ```bash
+python3.10 -m venv .venv
 source .venv/bin/activate
+python -m pip install -r requirements.txt
+cp .env.example .env
 python start.py
 ```
 
-Abrir `https://192.168.1.98:8000`.
-
-Este es el modo normal de uso y despliegue. Se ejecuta un solo servidor web:
-FastAPI publica simultáneamente la API `/api`, Swagger protegido y el bundle
-React compilado. No hay que arrancar Vite ni mantener dos terminales.
-
-La primera visita requiere aceptar el certificado autofirmado. `start.py`
-utiliza `APP_PORT`, o `CDSW_APP_PORT` cuando Cloudera lo proporciona.
-
-### Primera compilación del frontend
-
-Una copia nueva del repositorio no contiene `frontend/dist`, porque es un
-artefacto generado. Hay que crearlo una sola vez tras clonar el proyecto y
-repetirlo únicamente cuando cambie el código React o CSS:
+Para recompilar React:
 
 ```bash
-cd frontend
-npm ci
-npm run build
-cd ..
+npm install --prefix frontend
+npm run build --prefix frontend
 ```
 
-Después, el único comando de arranque vuelve a ser:
-
-```bash
-python start.py
-```
-
-El `Dockerfile` ya realiza esta compilación automáticamente durante la
-construcción de la imagen.
-
-### Desarrollo del frontend con recarga en caliente — opcional
-
-Solo quienes estén modificando React o CSS necesitan dos procesos:
-
-Terminal 1, API:
-
-```bash
-source .venv/bin/activate
-python -m uvicorn backend.main:app --reload \
-  --host 192.168.1.98 --port 8000 \
-  --ssl-certfile certs/localhost.crt \
-  --ssl-keyfile certs/localhost.key
-```
-
-Terminal 2, Vite:
-
-```bash
-cd frontend
-npm run dev
-```
-
-Abrir `https://192.168.1.98:5173`. Este modo es una ayuda de desarrollo, no el
-procedimiento de ejecución normal ni el utilizado por Docker.
-
-### Docker
-
-```bash
-docker build -t ranger-security-intelligence .
-docker run --rm -p 8000:8000 --env-file .env ranger-security-intelligence
-```
-
-El CSV y el SQLite deben montarse como volumen si se necesita geolocalización dentro del contenedor.
-
-### Cloudera AI Workbench
-
-El arranque reconoce `CDSW_APP_PORT`:
-
-```bash
-python start.py
-```
-
-Recomendaciones productivas:
-
-1. Inyectar secretos desde el mecanismo de Cloudera, no desde Git.
-2. Instalar la CA que firma Ranger y activar validación TLS.
-3. Limitar acceso a la app mediante identidad corporativa.
-4. Persistir `data/chat_audit.jsonl` en almacenamiento gobernado.
-5. Proteger o retirar `/api/admin/build-geo-index` tras construir el índice.
-6. Proteger MCP con autenticación antes de usar Streamable HTTP.
-
-## 12. Pruebas y verificación
-
-Ejecutar:
+Verificación completa:
 
 ```bash
 python -m pytest -q
 python -m compileall -q backend scripts start.py
-cd frontend && npm run build
+npm run build --prefix frontend
+git diff --check
 ```
 
-Cobertura funcional actual:
-
-- conteos permitidos/denegados y tasa;
-- ranking y normalización de recursos;
-- servicio como parte de la identidad del recurso;
-- agrupación completa de recursos por servicio;
-- agrupación de recursos por usuario conservando el servicio de cada activo;
-- denominadores completos en los widgets mediante la categoría `Otros`;
-- interpretación natural de desglose por usuario;
-- respuesta MCP/API exclusivamente de lectura;
-- construcción del filtro Solr negativo para usuarios internos;
-- paginación de auditorías;
-- periodos de 3 y 6 meses;
-- límite máximo de muestra;
-- agrupación de IP privadas en Embajadores 181.
-- hash scrypt y rechazo de credenciales incorrectas;
-- cookie `HttpOnly`, `Secure`, `SameSite=Strict`, logout y rechazo de sesiones manipuladas;
-- protección de APIs, Swagger y OpenAPI sin cookie;
-- catálogo LLM limitado a aliases publicados en `.env`;
-- llamada compatible con OpenAI a AI Gateway y rechazo de modelos no permitidos.
-- obtención y reutilización de credential cache Kerberos;
-- construcción del filtro negativo `reqUser` en Solr;
-- normalización `reqUser/repo/resource/cliIP/evtTime/result` al contrato interno;
-- ordenación y paginación Solr.
-
-Estado de la suite para esta versión:
+Estado de la suite en esta versión:
 
 ```text
-21 passed
-Frontend Vite: build completado
-Revisión visual: 7 días y 6 meses con datos reales
+33 passed
+Frontend Vite: build correcto
 ```
 
-La revisión visual incluye distribuciones desiguales —1.283, 740 y 28 accesos
-por identidad— y un escenario con una única identidad denegada. Esto valida que
-los rankings de intensidad no dependan de disponer de muchas categorías para
-seguir siendo legibles.
+La prueba definitiva de red, identidad CML, Knox y modelo solo puede realizarse
+en la plataforma Cloudera del entorno objetivo.
 
-La integración real se validó el 23 de julio de 2026 desde el entorno de
-desarrollo: se obtuvo un TGT contra `base1.mole4.local`, Solr respondió con
-`connected=true`, `zkConnected=true` y un universo de 726.785 auditorías en
-ese instante. La cifra es dinámica y solo certifica conectividad y lectura,
-no debe utilizarse como KPI funcional.
-
-Para repetir la prueba en otro entorno, la red debe resolver
-`base1.mole4.local` y `base2.mole4.local`, alcanzar el KDC y disponer de
-credenciales Kerberos. Para evitar carga accidental, comenzar con `rows=10`.
-
-## 13. Trazabilidad y seguridad
+## 18. Seguridad
 
 ### Controles implementados
 
-- Credenciales confinadas al backend.
-- Contraseña de acceso almacenada como hash scrypt; nunca en texto claro.
-- Cookie firmada `HttpOnly`, `Secure` y `SameSite=Strict`, con caducidad configurable.
-- APIs, Swagger y OpenAPI protegidos por sesión.
-- Límite de cinco fallos de acceso por IP durante cinco minutos.
-- Cliente Solr con superficie GET cerrada, SPNEGO y filtros construidos desde valores validados.
-- Cliente Ranger restringido a lectura de políticas.
-- Muestra limitada a 100.000 eventos.
-- Paginación en bloques de 10.000.
-- Caché por periodo, muestra y filtro de identidad.
-- Exclusión en origen y filtro compensatorio local.
-- Chat basado en intenciones permitidas.
-- MCP sin tools de escritura.
-- Auditoría JSONL de pregunta, intención, respuesta, alcance y errores.
-- `.env`, logs, SQLite y CSV excluidos de Git.
-- Credential cache Kerberos excluido de Git.
+- superficie de Ranger limitada a GET;
+- tools MCP de solo lectura;
+- credenciales confinadas al backend;
+- secretos no devueltos por `/api/config`;
+- `/tmp/jwt` leído únicamente en servidor;
+- cookie local `HttpOnly` y firmada;
+- límite de intentos de login;
+- muestra máxima de 100.000;
+- filtros de usuarios técnicos;
+- bitácora JSONL;
+- `.env`, `.env.cml`, keytabs y cachés fuera de Git;
+- diagnósticos sin mostrar credenciales ni respuestas completas;
+- frontend compilado servido por FastAPI.
 
-### Límites conocidos
+### Recomendaciones para producción
 
-- La detección de políticas riesgosas es heurística; no reemplaza una revisión formal.
-- El CSV determina la precisión de la geolocalización.
-- Las IP privadas se representan mediante una ubicación organizativa acordada, no su posición física real.
-- La muestra puede no contener todos los eventos del periodo.
-- La caché es local al proceso; un despliegue con múltiples réplicas debería usar un almacén compartido.
-- Tablas y gráficas son deterministas; el LLM solo redacta sobre esa evidencia. Si AI Gateway falla, se conserva la respuesta local y se identifica el fallback.
-- El selector muestra aliases del gateway, no proveedores directos. `embedding-local` y `guardian-seguridad` no se ofrecen como modelos generales de chat.
+1. Activar validación TLS con la CA corporativa.
+2. Guardar secretos como variables seguras del proyecto CML.
+3. Restringir la Web App a administradores autorizados.
+4. Persistir la bitácora en almacenamiento gobernado.
+5. Revisar la sensibilidad de auditorías antes de habilitar MCP.
+6. Proteger o retirar la construcción del índice geográfico.
+7. Establecer versiones fijas de dependencias frontend.
 
-## 14. Evolución recomendada
+## 19. Diagnóstico habitual
 
-1. Autenticación corporativa y roles de visualización.
-2. CA corporativa y TLS estricto con Ranger.
-3. Persistencia gobernada de auditoría en Kudu, Iceberg o almacenamiento corporativo.
-4. Métricas comparativas respecto al periodo anterior.
-5. Clasificaciones Atlas y cobertura de masking/row filters.
-6. Detección de anomalías con baseline explicable.
-7. OAuth 2.1 para MCP Streamable HTTP.
-8. Pruebas de contrato contra la versión concreta de Ranger del cliente.
+| Mensaje | Interpretación | Acción |
+|---|---|---|
+| `No se encontró la carpeta...` | CML cargó una carpeta incompleta | comprobar `requirements.txt`, `backend/` y `frontend/` |
+| `requirements.txt not found` | raíz de proyecto incorrecta | usar el `start.py` actualizado |
+| `asyncio.run() cannot be called...` | Uvicorn se inició dentro del loop de IPython | ejecutar mediante el subproceso de `start.py` |
+| `No se llegó a la URL de Ranger` | DNS, red, timeout o SSL | revisar URL y conectividad desde CML |
+| HTTP 401 Ranger | usuario o `WORKLOAD_PASSWORD` incorrectos | regenerar la contraseña en User Settings |
+| HTTP 403 Ranger | usuario sin permisos | revisar roles y políticas |
+| HTTP 200 sin JSON | ruta Knox incorrecta, HTML o redirección | comprobar URL `cdp-proxy-token/ranger` |
+| modelo sin contenido | stream sin `content` o tokens agotados en razonamiento | revisar tooltip y aumentar límite si procede |
+| `kinit` no encontrado | Kerberos activado sin cliente instalado | apagar Kerberos para Knox o instalar herramientas |
 
-## 15. Licencia y responsabilidad
+## 20. Preparación del futuro AMP
 
-El proyecto usa componentes open source y debe incorporar la licencia corporativa elegida antes de distribuirse. Los datos de auditoría pueden contener identidades, direcciones IP y nombres de activos sensibles; su acceso, conservación y exportación deben someterse a las políticas de gobierno de la organización.
+El repositorio todavía no contiene el descriptor AMP definitivo. El siguiente
+paso será añadir un YAML similar a:
+
+```yaml
+name: Apache Ranger Intelligence AMP
+description: "Dashboard de auditoría y gobierno de Apache Ranger para CML."
+author: "smerchanmole"
+specification_version: 1.0
+prototype_version: 1.0
+
+runtimes:
+- editor: JupyterLab
+  kernel: Python 3.10
+  edition: Standard
+
+tasks:
+- type: start_application
+  name: Ranger Intelligence
+  subdomain: ranger-intelligence
+  script: start.py
+  kernel: python3
+  short_summary: "Dashboard Apache Ranger"
+  long_summary: "Auditoría, KPIs, diagnóstico y análisis de Ranger mediante Knox."
+  cpu: 4
+  memory: 8
+```
+
+El AMP deberá añadir variables configurables sin incluir valores secretos y
+mantener `start.py` como punto único de instalación y arranque.
+
+## 21. Límites conocidos
+
+- La configuración introducida en la web vive en memoria y se pierde al
+  reiniciar el contenedor.
+- La disponibilidad real depende de la red y permisos del entorno CML.
+- Solr directo puede no estar publicado desde la red del runtime.
+- La geolocalización depende de la calidad del CSV.
+- El LLM solo redacta sobre la evidencia recibida; puede no estar disponible.
+- La caché es local al proceso.
+- MCP aún no dispone de autenticación corporativa propia.
+- La allowlist de administradores CML queda para el siguiente paso.
+
+---
+
+Apache, Apache Ranger, Apache Atlas, Apache Hive, Apache Hadoop y sus logos son
+marcas de The Apache Software Foundation. Cloudera y sus marcas pertenecen a
+Cloudera, Inc. El uso de los logos en esta aplicación identifica los servicios
+integrados y no implica respaldo.
