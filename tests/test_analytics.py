@@ -71,6 +71,32 @@ def test_chat_understands_natural_user_breakdown():
     assert "porcentaje" in result["table"][0]
 
 
+def test_chat_finds_table_with_most_denied_column_accesses():
+    audits = [
+        {"accessResult": 0, "repoName": "cm_hive", "resourceType": "@column", "resourcePath": "ventas/pedidos/importe"},
+        {"accessResult": 0, "repoName": "cm_hive", "resourceType": "@column", "resourcePath": "ventas/pedidos/cliente_id"},
+        {"accessResult": 0, "repoName": "cm_hive", "resourceType": "@column", "resourcePath": "ventas/clientes/email"},
+        {"accessResult": 1, "repoName": "cm_hive", "resourceType": "@column", "resourcePath": "ventas/clientes/email"},
+    ]
+    result = answer("¿Qué tabla tiene más accesos rechazados?", audits, [])
+    assert result["intent"] == "denied_tablas"
+    assert result["table"][0] == {
+        "servicio": "cm_hive", "base_datos": "ventas", "tabla": "pedidos", "denegaciones": 2,
+    }
+
+
+def test_chat_finds_most_denied_column():
+    audits = [
+        {"accessResult": 0, "repoName": "cm_hive", "resourceType": "@column", "resourcePath": "ventas/personas/email"},
+        {"accessResult": 0, "repoName": "cm_hive", "resourceType": "@column", "resourcePath": "ventas/personas/email"},
+        {"accessResult": 0, "repoName": "cm_hive", "resourceType": "@column", "resourcePath": "ventas/personas/dni"},
+    ]
+    result = answer("¿Qué columna se está rechazando más?", audits, [])
+    assert result["intent"] == "denied_columnas"
+    assert result["table"][0]["columna"] == "email"
+    assert result["table"][0]["denegaciones"] == 2
+
+
 def test_ranger_excludes_service_users(monkeypatch):
     client = RangerClient(Settings(ranger_password="test", ranger_exclude_users="hive,spark"))
     captured = {}

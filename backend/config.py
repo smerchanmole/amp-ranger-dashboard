@@ -58,6 +58,11 @@ class Settings(BaseSettings):
     ai_gateway_models: str = "nvidia/nemotron-3-nano"
     ai_gateway_default_model: str = "nvidia/nemotron-3-nano"
     ai_gateway_timeout_seconds: int = 90
+    agent_provider: str = "cloudera"
+    cloudera_ai_api_url: str = ""
+    cloudera_ai_token: str = ""
+    cloudera_ai_models: str = ""
+    cloudera_ai_default_model: str = ""
 
     @property
     def services(self) -> list[str]:
@@ -71,6 +76,10 @@ class Settings(BaseSettings):
     def gateway_models(self) -> list[str]:
         """Aliases publicados por LiteLLM; nunca nombres directos de proveedor."""
         return [item.strip() for item in self.ai_gateway_models.split(",") if item.strip()]
+
+    @property
+    def cloudera_models(self) -> list[str]:
+        return [item.strip() for item in self.cloudera_ai_models.split(",") if item.strip()]
 
     @property
     def effective_ai_token(self) -> tuple[str, str]:

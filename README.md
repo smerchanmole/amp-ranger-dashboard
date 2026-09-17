@@ -177,6 +177,21 @@ Se aceptan respuestas SSE y respuestas JSON compatibles. Si no aparece texto,
 el diagnóstico informa del tipo de contenido, número de eventos, claves
 recibidas, `finish_reason` y fragmentos de razonamiento, sin mostrar el token.
 
+El agente es **híbrido y gobernado**: `chat.py` calcula primero una evidencia
+determinista sobre las auditorías permitidas y el modelo real redacta la
+explicación. Si el endpoint LLM no responde, la tabla y la gráfica calculadas
+siguen disponibles como respaldo. El chat reconoce, entre otras, estas
+preguntas:
+
+- `¿Qué tabla tiene más accesos rechazados?`
+- `¿Qué columna se está rechazando más?`
+- `¿Qué usuarios tienen más denegaciones?`
+- `¿Qué recursos fueron los más solicitados?`
+
+Los recursos Hive con `resType=@column` se interpretan como
+`base_datos/tabla/columna`. El ranking por tabla agrega las denegaciones de
+todas sus columnas sin confundirlas con rutas HDFS.
+
 ## 5. Arranque autocontenido en CML
 
 CML permite indicar un único fichero Python. El fichero es:
@@ -364,6 +379,12 @@ La contraseña se entrega por entrada estándar y no forma parte del comando.
 | Modelos | identificadores separados por comas |
 | Modelo predeterminado | debe existir en la lista anterior |
 
+El chat incorpora además **Configurar agente**, que permite alternar durante
+la sesión entre AI Gateway/LiteLLM y Cloudera AI Inference. El token introducido
+nunca vuelve al navegador y el log solo registra si fue actualizado. Un valor
+vacío conserva la credencial actual. Para que el cambio persista tras reiniciar
+el AMP deben configurarse las variables de entorno.
+
 ## 8. Variables de entorno
 
 La web permite modificar los campos operativos en memoria. Para establecer
@@ -401,6 +422,11 @@ USE_CML_JWT=true
 CML_JWT_PATH=/tmp/jwt
 AI_GATEWAY_MODELS=nvidia/nemotron-3-nano
 AI_GATEWAY_DEFAULT_MODEL=nvidia/nemotron-3-nano
+AGENT_PROVIDER=cloudera
+CLOUDERA_AI_API_URL=
+CLOUDERA_AI_TOKEN=
+CLOUDERA_AI_MODELS=
+CLOUDERA_AI_DEFAULT_MODEL=
 
 SERVER_IP=127.0.0.1
 APP_PORT=8000
@@ -541,6 +567,7 @@ evitar mezclar universos distintos.
 | `GET` | `/api/dashboard` | KPIs, tablas y distribuciones |
 | `GET` | `/api/map` | puntos geográficos agregados |
 | `POST` | `/api/chat` | consulta semántica gobernada |
+| `POST` | `/api/agent/config` | perfil temporal del agente sin exponer secretos |
 | `GET` | `/api/logs` | registro reciente |
 | `POST` | `/api/admin/build-geo-index` | construcción del índice IPv4 |
 | `GET` | `/docs` | Swagger protegido |
@@ -708,6 +735,7 @@ pruebas CML pueden omitirse si no se necesita el mapa.
 topo-ranger-kpi-agent-cloudera-amp/
 ├── backend/
 │   ├── analytics.py       # KPIs y agregaciones deterministas
+│   ├── agent_runtime.py   # perfiles LiteLLM/Cloudera sin exponer secretos
 │   ├── audit_log.py       # bitácora JSONL
 │   ├── auth.py            # identidad CML y sesión local
 │   ├── chat.py            # intenciones permitidas

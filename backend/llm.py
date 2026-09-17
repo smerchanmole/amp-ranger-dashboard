@@ -12,6 +12,7 @@ from typing import Any
 import requests
 
 from .chat import SYSTEM_CONTEXT
+from .agent_runtime import AgentRuntime
 from .config import Settings
 
 
@@ -20,23 +21,26 @@ class GatewayError(RuntimeError):
 
 
 class AIGatewayClient:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, runtime: AgentRuntime | None = None):
         self.settings = settings
+        self.runtime = runtime or AgentRuntime(settings)
 
-    def _headers(self) -> dict[str, str]:
+    def _headers(self, profile: dict[str, Any]) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
-        token, _ = self.settings.effective_ai_token
+        token = profile["token"]
         if token:
             headers["Authorization"] = f"Bearer {token}"
         return headers
 
-    def _stream_completion(self, payload: dict[str, Any]) -> str:
+    def _stream_completion(self, profile: dict[str, Any], payload: dict[str, Any]) -> str:
         payload = {**payload, "stream": True}
+        if not profile["endpoint"]:
+            raise GatewayError(f"Configura el endpoint del proveedor {profile['id']}")
         try:
             response = requests.post(
-                f"{self.settings.ai_gateway_api_url.rstrip('/')}/chat/completions",
+                f"{profile['endpoint'].rstrip('/')}/chat/completions",
                 json=payload,
-                headers=self._headers(),
+                headers=self._headers(profile),
                 timeout=self.settings.ai_gateway_timeout_seconds,
                 stream=True,
             )
@@ -95,19 +99,20 @@ class AIGatewayClient:
 
     def probe(self) -> dict[str, Any]:
         """Comprueba autenticación y respuesta real con el mínimo de tokens."""
-        model = self.settings.ai_gateway_default_model
-        _, token_source = self.settings.effective_ai_token
-        self._stream_completion({
+        profile = self.runtime.profile()
+        model = profile["defaultModel"]
+        self._stream_completion(profile, {
             "model": model,
             "messages": [{"role": "user", "content": "Responde únicamente OK"}],
             "max_tokens": 64,
             "temperature": 0.2,
             "top_p": 0.7,
         })
-        return {"connected": True, "model": model, "tokenSource": token_source}
+        return {"connected": True, "provider": profile["id"], "model": model, "tokenSource": profile["tokenSource"]}
 
-    def explain(self, model: str, question: str, result: dict[str, Any]) -> str:
-        if model not in self.settings.gateway_models:
+    def explain(self, provider: str, model: str, question: str, result: dict[str, Any]) -> str:
+        profile = self.runtime.profile(provider)
+        if model not in profile["models"]:
             raise GatewayError(f"Modelo no permitido: {model}")
         evidence = {
             "resumen_determinista": result.get("answer"),
@@ -122,4 +127,4 @@ class AIGatewayClient:
             ],
         }
         payload.update({"temperature": 0.2, "top_p": 0.7, "max_tokens": 1024})
-        return self._stream_completion(payload)
+        return self._stream_completion(profile, payload)

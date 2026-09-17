@@ -21,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .analytics import dashboard
+from .agent_runtime import AgentConfigError, AgentRuntime
 from .auth import (
     clear_login_failures, clear_session_cookie, cloudera_user, login_allowed, read_session,
     record_login_failure, require_user, set_session_cookie, verify_password,
@@ -38,7 +39,8 @@ client = RangerClient(settings)
 audit_client = SolrAuditClient(settings) if settings.audit_source.casefold() == "solr" else client
 log = JsonlAuditLog(settings.audit_log_path)
 geo = GeoDatabase(settings.geo_csv_path, settings.geo_db_path)
-gateway = AIGatewayClient(settings)
+agent_runtime = AgentRuntime(settings)
+gateway = AIGatewayClient(settings, agent_runtime)
 app = FastAPI(title="Ranger Security Intelligence", version="0.2.0", docs_url=None, redoc_url=None, openapi_url=None)
 app.add_middleware(CORSMiddleware, allow_origins=[x.strip() for x in settings.cors_origins.split(",")], allow_methods=["GET", "POST"], allow_headers=["*"])
 _cache: dict[str, tuple[float, tuple[list[dict], list[dict]]]] = {}
@@ -51,6 +53,15 @@ class ChatRequest(BaseModel):
     exclude_internal: bool = True
     sample_size: int = Field(default=5000, ge=100, le=100000)
     model: str | None = Field(default=None, max_length=100)
+    provider: Literal["litellm", "cloudera"] | None = None
+
+
+class AgentConfigRequest(BaseModel):
+    provider: Literal["litellm", "cloudera"]
+    endpoint: str = Field(min_length=8, max_length=1000)
+    token: str | None = Field(default=None, max_length=8000)
+    models: list[str] = Field(min_length=1, max_length=100)
+    default_model: str = Field(min_length=1, max_length=200)
 
 
 class LoginRequest(BaseModel):
@@ -252,13 +263,33 @@ def public_runtime_config(username: str = Depends(require_user)):
             "cmlJwtAvailable": settings.cml_jwt_path.is_file(),
             "tokenSource": settings.effective_ai_token[1],
         },
+        "agent": agent_runtime.public(),
     }
+
+
+@app.post("/api/agent/config")
+def update_agent_config(payload: AgentConfigRequest, username: str = Depends(require_user)):
+    """Aplica un perfil temporal sin devolver ni registrar el secreto."""
+    try:
+        config = agent_runtime.update(
+            payload.provider, payload.endpoint, payload.token,
+            payload.models, payload.default_model,
+        )
+        log.append({
+            "type": "agent_config", "username": username,
+            "provider": payload.provider, "endpoint": payload.endpoint,
+            "models": payload.models, "defaultModel": payload.default_model,
+            "tokenUpdated": bool(payload.token and payload.token.strip()),
+        })
+        return config
+    except AgentConfigError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
 
 
 @app.post("/api/config")
 def update_runtime_config(payload: RuntimeConfigRequest, username: str = Depends(require_user)):
     """Aplica configuración a este proceso CML sin escribir secretos en disco."""
-    global client, audit_client, gateway
+    global client, audit_client, agent_runtime, gateway
     values = payload.model_dump()
     requested_models = [item.strip() for item in payload.ai_gateway_models.split(",") if item.strip()]
     if payload.ai_gateway_default_model not in requested_models:
@@ -285,7 +316,8 @@ def update_runtime_config(payload: RuntimeConfigRequest, username: str = Depends
         setattr(settings, key, value)
     client = RangerClient(settings)
     audit_client = SolrAuditClient(settings) if settings.audit_source == "solr" else client
-    gateway = AIGatewayClient(settings)
+    agent_runtime = AgentRuntime(settings)
+    gateway = AIGatewayClient(settings, agent_runtime)
     with _cache_lock:
         _cache.clear()
     log.append({"type": "runtime_config_updated", "username": username, "auditSource": settings.audit_source})
@@ -316,19 +348,24 @@ def chat(request: ChatRequest, username: str = Depends(require_user)):
     try:
         audits, policies = load(request.period, request.exclude_internal, request.sample_size)
         result = answer(request.question, audits, policies)
-        model = request.model or settings.ai_gateway_default_model
-        if model not in settings.gateway_models:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Modelo AI Gateway no permitido")
+        profile = agent_runtime.profile(request.provider)
+        provider = profile["id"]
+        model = request.model or profile["defaultModel"]
+        if model not in profile["models"]:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Modelo no permitido para el proveedor seleccionado")
         gateway_status = "ok"
         try:
-            result["answer"] = gateway.explain(model, request.question, result)
+            result["answer"] = gateway.explain(provider, model, request.question, result)
         except GatewayError as exc:
             # El cálculo gobernado sigue disponible aunque el LLM local esté cargando.
             gateway_status = "fallback"
             result["gatewayWarning"] = str(exc)
         result["model"] = model
-        log.append({"type": "chat", "username": username, "model": model, "gatewayStatus": gateway_status, "question": request.question, "period": request.period, "excludeInternal": request.exclude_internal, "sampleSize": request.sample_size, "intent": result["intent"], "answer": result["answer"], "resultCount": len(result["data"])})
+        result["provider"] = provider
+        log.append({"type": "chat", "username": username, "provider": provider, "model": model, "gatewayStatus": gateway_status, "question": request.question, "period": request.period, "excludeInternal": request.exclude_internal, "sampleSize": request.sample_size, "intent": result["intent"], "answer": result["answer"], "resultCount": len(result["data"])})
         return result
+    except AgentConfigError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
     except (RangerError, SolrError) as exc:
         log.append({"type": "chat_error", "question": request.question, "error": str(exc)})
         raise HTTPException(502, str(exc)) from exc

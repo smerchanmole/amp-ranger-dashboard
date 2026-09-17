@@ -18,13 +18,14 @@ SYSTEM_CONTEXT = """Eres el Analista de Seguridad de Apache Ranger. Trabajas ún
 la muestra de auditorías y políticas entregada por el backend y nunca inventas datos. Responde
 en español claro. Selecciona el formato más útil: resumen textual, tabla de accesos y/o gráfica.
 Incluye siempre el periodo y tamaño de muestra. Puedes analizar accesos permitidos o denegados,
-usuarios, servicios, operaciones, recursos, IP y políticas. No ejecutas cambios en Ranger."""
+usuarios, servicios, operaciones, recursos, tablas, columnas, IP y políticas. Cuando la evidencia
+incluya base, tabla o columna, nómbralas de forma explícita. No ejecutas cambios en Ranger."""
 
 AVAILABLE_APIS = [
     {
         "método": "GET",
-        "api": "/service/xaudit/access_audit",
-        "función": "Consulta auditorías de acceso; excluye la lista configurable de usuarios internos mediante excludeUser.",
+        "api": "/service/xaudit/access_audit o /solr/ranger_audits/select",
+        "función": "Consulta auditorías Ranger vía Knox o directamente en Solr; aplica fechas, muestra y exclusión de usuarios.",
     },
     {
         "método": "GET",
@@ -43,6 +44,53 @@ def _counter_chart(counter: Counter[str], title: str, limit: int = 10) -> dict[s
     return {"type": "bar", "title": title, "data": [{"name": name, "value": value} for name, value in counter.most_common(limit)]}
 
 
+def _resource_parts(item: dict[str, Any]) -> dict[str, str]:
+    """Interpreta recursos Ranger conservando la evidencia original.
+
+    Hive representa normalmente una columna como ``base/tabla/columna`` y una
+    tabla como ``base/tabla``. Las rutas HDFS no se reclasifican artificialmente.
+    """
+    raw = str(item.get("resourcePath") or item.get("resource") or "desconocido")
+    resource_type = str(item.get("resourceType") or item.get("resType") or "").casefold()
+    service = str(item.get("repoName") or item.get("repo") or item.get("serviceType") or "desconocido")
+    parts = [part for part in raw.strip("/").split("/") if part]
+    database = table = column = ""
+    if "column" in resource_type and len(parts) >= 3:
+        database, table, column = parts[0], parts[1], "/".join(parts[2:])
+    elif "table" in resource_type and len(parts) >= 2:
+        database, table = parts[0], "/".join(parts[1:])
+    return {
+        "servicio": service, "tipo": resource_type.lstrip("@") or "recurso",
+        "base_datos": database, "tabla": table, "columna": column,
+        "recurso_completo": raw,
+    }
+
+
+def _denied_objects(denied: list[dict[str, Any]], dimension: str) -> tuple[list[dict[str, Any]], Counter[str]]:
+    """Agrega denegaciones por tabla o columna con claves no ambiguas."""
+    counts: Counter[tuple[str, ...]] = Counter()
+    for event in denied:
+        resource = _resource_parts(event)
+        if dimension == "tabla" and resource["tabla"]:
+            counts[(resource["servicio"], resource["base_datos"], resource["tabla"])] += 1
+        elif dimension == "columna" and resource["columna"]:
+            counts[(resource["servicio"], resource["base_datos"], resource["tabla"], resource["columna"])] += 1
+
+    rows: list[dict[str, Any]] = []
+    chart: Counter[str] = Counter()
+    for key, count in counts.most_common(100):
+        service, database, table, *rest = key
+        row = {"servicio": service, "base_datos": database, "tabla": table}
+        label = f"{database}.{table}"
+        if dimension == "columna":
+            row["columna"] = rest[0]
+            label += f".{rest[0]}"
+        row["denegaciones"] = count
+        rows.append(row)
+        chart[f"{service} · {label}"] = count
+    return rows, chart
+
+
 def answer(question: str, audits: list[dict[str, Any]], policies: list[dict[str, Any]]) -> dict[str, Any]:
     q = question.lower().strip()
     sample = len(audits)
@@ -58,6 +106,29 @@ def answer(question: str, audits: list[dict[str, Any]], policies: list[dict[str,
     denied = [item for item in audits if not _allowed(item)]
     allowed = [item for item in audits if _allowed(item)]
     now = datetime.now(timezone.utc)
+
+    asks_denied = any(token in q for token in ("deneg", "rechaz", "bloque", " ko", "fall"))
+    asks_table = any(token in q for token in ("tabla", "tablas"))
+    asks_column = any(token in q for token in ("columna", "columnas", "campo", "campos"))
+    if asks_denied and (asks_table or asks_column):
+        dimension = "columna" if asks_column and not asks_table else "tabla"
+        rows, chart_counts = _denied_objects(denied, dimension)
+        if not rows:
+            return _result(
+                f"No hay denegaciones con metadatos de {dimension} en la muestra de {sample} accesos.",
+                f"denied_{dimension}s", [], [],
+            )
+        leader = rows[0]
+        qualified = f'{leader["base_datos"]}.{leader["tabla"]}'
+        if dimension == "columna":
+            qualified += f'.{leader["columna"]}'
+        return _result(
+            f"La {dimension} con más accesos rechazados es {qualified}, del servicio "
+            f'{leader["servicio"]}, con {leader["denegaciones"]} denegaciones dentro de una muestra de {sample} accesos.',
+            f"denied_{dimension}s", rows, rows,
+            _counter_chart(chart_counts, f"{dimension.capitalize()}s con más denegaciones"),
+        )
+
     if any(token in q for token in ("última hora", "ultima hora", "últimos 60", "ultimos 60")):
         events = [item for item in audits if (when := _time(item)) and timedelta(0) <= now - when <= timedelta(hours=1)]
         ok = sum(_allowed(item) for item in events)
