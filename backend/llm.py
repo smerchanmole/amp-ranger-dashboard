@@ -116,13 +116,14 @@ class AIGatewayClient:
             raise GatewayError(f"Modelo no permitido: {model}")
         evidence = {
             "resumen_determinista": result.get("answer"),
+            "fuente_auditoria": result.get("auditSource"),
             "tabla": result.get("table", [])[:20],
             "grafica": result.get("chart"),
         }
         payload = {
             "model": model,
             "messages": [
-                {"role": "system", "content": SYSTEM_CONTEXT + "\nResume únicamente la evidencia proporcionada; no inventes datos ni acciones."},
+                {"role": "system", "content": SYSTEM_CONTEXT + "\nDevuelve primero un resumen breve y ejecutivo. Resume únicamente la evidencia proporcionada; no inventes datos ni acciones. La tabla y la gráfica se renderizan por separado."},
                 {"role": "user", "content": f"Pregunta: {question}\nEvidencia calculada por Ranger Intelligence: {evidence}"},
             ],
         }

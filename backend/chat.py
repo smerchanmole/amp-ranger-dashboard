@@ -107,6 +107,24 @@ def answer(question: str, audits: list[dict[str, Any]], policies: list[dict[str,
     allowed = [item for item in audits if _allowed(item)]
     now = datetime.now(timezone.utc)
 
+    if any(token in q for token in ("evolución", "evolucion", "tendencia", "por día", "por dia", "temporal")):
+        timeline: dict[str, dict[str, int]] = {}
+        for item in audits:
+            when = _time(item)
+            if not when:
+                continue
+            day = when.astimezone(timezone.utc).date().isoformat()
+            row = timeline.setdefault(day, {"name": day, "allowed": 0, "denied": 0})
+            row["allowed" if _allowed(item) else "denied"] += 1
+        rows = [timeline[day] for day in sorted(timeline)]
+        table = [{"fecha": row["name"], "permitidos": row["allowed"], "denegados": row["denied"]} for row in rows]
+        return _result(
+            f"He resumido la evolución diaria de {sample} accesos en {len(rows)} días con datos.",
+            "access_timeline", rows, table,
+            {"type": "line", "title": "Evolución de accesos", "data": rows,
+             "series": [{"key": "allowed", "name": "Permitidos"}, {"key": "denied", "name": "Denegados"}]},
+        )
+
     asks_denied = any(token in q for token in ("deneg", "rechaz", "bloque", " ko", "fall"))
     asks_table = any(token in q for token in ("tabla", "tablas"))
     asks_column = any(token in q for token in ("columna", "columnas", "campo", "campos"))
@@ -133,14 +151,21 @@ def answer(question: str, audits: list[dict[str, Any]], policies: list[dict[str,
         events = [item for item in audits if (when := _time(item)) and timedelta(0) <= now - when <= timedelta(hours=1)]
         ok = sum(_allowed(item) for item in events)
         ko = len(events) - ok
-        chart = {"type": "bar", "title": "Accesos de la última hora", "data": [{"name": "Permitidos", "value": ok}, {"name": "Denegados", "value": ko}]}
+        chart = {"type": "column", "title": "Accesos de la última hora", "data": [{"name": "Permitidos", "value": ok}, {"name": "Denegados", "value": ko}]}
         return _result(f"En la última hora hay {len(events)} accesos: {ok} permitidos y {ko} denegados (muestra disponible: {sample}).", "last_hour", events, [audit_row(x) for x in events[:100]], chart)
 
     if "servicio" in q and ("usuario" in q or "acced" in q):
         pairs = Counter((str(a.get("requestUser") or "desconocido"), str(a.get("repoName") or "desconocido")) for a in audits)
         table = [{"usuario": user, "servicio": service, "accesos": count} for (user, service), count in pairs.most_common(100)]
         services = Counter(str(a.get("repoName") or "desconocido") for a in audits)
-        return _result(f"He agrupado {sample} accesos por usuario y servicio.", "users_services", table, table, _counter_chart(services, "Accesos por servicio"))
+        stacked: dict[str, dict[str, Any]] = {}
+        service_names = [name for name, _ in services.most_common(6)]
+        for (user, service), count in pairs.items():
+            if service in service_names:
+                stacked.setdefault(user, {"name": user})[service] = count
+        chart = {"type": "stacked-column", "title": "Accesos por usuario y servicio", "data": list(stacked.values())[:12],
+                 "series": [{"key": name, "name": name} for name in service_names]}
+        return _result(f"He agrupado {sample} accesos por usuario y servicio.", "users_services", table, table, chart)
 
     if "comod" in q or ("polític" in q and "riesgo" in q):
         matches = [p for p in policies if '"*"' in str(p) or "public" in str(p).lower()][:100]
@@ -171,7 +196,7 @@ def answer(question: str, audits: list[dict[str, Any]], policies: list[dict[str,
             f"He distribuido los {sample} accesos entre {len(services)} servicios, ordenados de mayor a menor actividad.",
             "accesses_by_service", data,
             [{"servicio": x["name"], "accesos": x["value"], "porcentaje": round(x["value"] * 100 / sample, 1) if sample else 0} for x in data],
-            _counter_chart(services, "Accesos por servicio"),
+            {"type": "donut", "title": "Distribución por servicio", "data": data[:10]},
         )
 
     if any(word in q for word in ("operación", "operacion", "acción", "accion")):
@@ -181,7 +206,7 @@ def answer(question: str, audits: list[dict[str, Any]], policies: list[dict[str,
             f"He agrupado {sample} accesos por tipo de operación, mostrando primero las más frecuentes.",
             "accesses_by_operation", data,
             [{"operación": x["name"], "accesos": x["value"]} for x in data],
-            _counter_chart(operations, "Accesos por operación"),
+            {"type": "column", "title": "Accesos por operación", "data": data[:12]},
         )
 
     if "recurso" in q and any(word in q for word in ("solicit", "acced", "usad", "consult")):

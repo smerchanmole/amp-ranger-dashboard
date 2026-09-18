@@ -80,6 +80,10 @@ class RuntimeConfigRequest(BaseModel):
     solr_server: str = Field(default="", max_length=500)
     solr_port: int = Field(default=8995, ge=1, le=65535)
     solr_collection: str = Field(default="ranger_audits", max_length=200)
+    solr_url: str = Field(default="", max_length=1500)
+    solr_auth_type: Literal["none", "basic"] = "none"
+    solr_user: str = Field(default="", max_length=200)
+    solr_password: str = Field(default="", max_length=4000)
     kerberos_enabled: bool = False
     kerberos_user: str = Field(default="", max_length=200)
     kerberos_realm: str = Field(default="", max_length=200)
@@ -241,6 +245,11 @@ def public_runtime_config(username: str = Depends(require_user)):
             "server": settings.solr_server,
             "port": settings.solr_port,
             "collection": settings.solr_collection,
+            "url": settings.solr_url,
+            "selectUrl": settings.solr_select_url,
+            "authType": settings.solr_auth_type,
+            "user": settings.solr_user,
+            "hasPassword": bool(settings.solr_password),
         },
         "kerberos": {
             "enabled": settings.kerberos_enabled,
@@ -307,7 +316,16 @@ def update_runtime_config(payload: RuntimeConfigRequest, username: str = Depends
             raise HTTPException(422, f"Kerberos requiere: {', '.join(missing)}")
         if not (payload.kerberos_password or payload.kerberos_keytab or settings.kerberos_password):
             raise HTTPException(422, "Kerberos requiere una contraseña o la ruta de un keytab")
-    for secret in ("ranger_password", "ranger_token", "kerberos_password", "ai_gateway_token", "cdp_token"):
+    if payload.audit_source == "solr":
+        if payload.solr_url and not payload.solr_url.startswith(("https://", "http://")):
+            raise HTTPException(422, "La URL de Solr debe comenzar por https:// o http://")
+        if not payload.solr_url.strip() and not payload.solr_server.strip():
+            raise HTTPException(422, "Solr requiere una URL completa o un servidor")
+        if not payload.kerberos_enabled and payload.solr_auth_type == "basic" and not payload.solr_user.strip():
+            raise HTTPException(422, "Solr Basic requiere un usuario")
+        if not payload.kerberos_enabled and payload.solr_auth_type == "basic" and not (payload.solr_password or settings.solr_password):
+            raise HTTPException(422, "Solr Basic requiere una contraseña")
+    for secret in ("ranger_password", "ranger_token", "solr_password", "kerberos_password", "ai_gateway_token", "cdp_token"):
         if not values[secret]:
             values.pop(secret)
     for path_field in ("kerberos_keytab", "kerberos_ccache", "kerberos_config_file"):
@@ -348,6 +366,7 @@ def chat(request: ChatRequest, username: str = Depends(require_user)):
     try:
         audits, policies = load(request.period, request.exclude_internal, request.sample_size)
         result = answer(request.question, audits, policies)
+        result["auditSource"] = settings.audit_source
         profile = agent_runtime.profile(request.provider)
         provider = profile["id"]
         model = request.model or profile["defaultModel"]

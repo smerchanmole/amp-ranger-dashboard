@@ -45,6 +45,24 @@ def test_resource_widgets_are_grouped_by_user_with_complete_totals():
     assert {resource["service"] for resource in ana["resources"]} == {"cm_hdfs"}
 
 
+def test_access_rankings_include_dimensions_and_user_counts():
+    audits = [
+        {"accessResult": 1, "requestUser": "ana", "repoName": "cm_hdfs", "resourceType": "path", "resourcePath": "/data/ventas"},
+        {"accessResult": 0, "requestUser": "bob", "repoName": "cm_hdfs", "resourceType": "path", "resourcePath": "/data/ventas"},
+        {"accessResult": 0, "requestUser": "ana", "repoName": "cm_hive", "resourceType": "@column", "resourcePath": "ventas/pedidos/importe", "accessType": "select"},
+        {"accessResult": 1, "requestUser": "bob", "repoName": "cm_hive", "resourceType": "@column", "resourcePath": "ventas/pedidos/importe", "accessType": "select"},
+    ]
+    dimensions = {row["id"]: row for row in dashboard(audits, [], ["cm_hdfs", "cm_hive"])["accessRankings"]}
+
+    folder = dimensions["folders"]["used"][0]
+    assert folder["value"] == 2
+    assert folder["users"] == [{"name": "ana", "value": 1}, {"name": "bob", "value": 1}]
+    assert dimensions["tables"]["denied"][0]["name"] == "ventas.pedidos"
+    assert dimensions["columns"]["used"][0]["name"] == "ventas.pedidos.importe"
+    select = next(row for row in dimensions["operations"]["used"] if row["name"] == "select")
+    assert select["value"] == 2
+
+
 def test_chat_is_limited_to_known_intents():
     result = answer("¿Qué usuarios tuvieron más accesos denegados?", AUDITS, [])
     assert result["intent"] == "denied_users"
@@ -69,6 +87,17 @@ def test_chat_understands_natural_user_breakdown():
     assert result["intent"] == "accesses_by_user"
     assert result["table"][0]["usuario"] in {"ana", "bob"}
     assert "porcentaje" in result["table"][0]
+
+
+def test_chat_uses_line_chart_for_temporal_evolution():
+    result = answer("¿Cómo ha sido la evolución por día?", AUDITS, [])
+    assert result["intent"] == "access_timeline"
+    assert result["chart"]["type"] == "line"
+    assert result["chart"]["series"] == [
+        {"key": "allowed", "name": "Permitidos"},
+        {"key": "denied", "name": "Denegados"},
+    ]
+    assert result["table"][0]["fecha"] == "2026-07-17"
 
 
 def test_chat_finds_table_with_most_denied_column_accesses():

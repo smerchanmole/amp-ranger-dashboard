@@ -63,6 +63,36 @@ def test_kerberos_principal_only_adds_realm_when_configured():
     )
 
 
+def test_knox_url_is_normalized_and_basic_credentials_use_stdin(tmp_path):
+    calls = []
+    payload = {"responseHeader": {"status": 0}, "response": {"numFound": 0, "docs": []}}
+    settings = Settings(
+        solr_url="https://h12cdpmp01x.salud.madrid.org:8443/gateway/cdp-proxy-api/solr/ranger_audits/select#/",
+        solr_auth_type="basic", solr_user="audit-reader", solr_password='secret"value',
+        kerberos_enabled=False, kerberos_ccache=tmp_path / "krb5cc",
+    )
+
+    def runner(command, **kwargs):
+        calls.append((command, kwargs))
+        return completed(command, stdout=json.dumps(payload))
+
+    SolrAuditClient(settings, runner).health()
+    command, kwargs = calls[0]
+    assert settings.solr_select_url == "https://h12cdpmp01x.salud.madrid.org:8443/gateway/cdp-proxy-api/solr/ranger_audits/select"
+    assert "--basic" in command
+    assert "--config" in command
+    assert "audit-reader" not in " ".join(command)
+    assert kwargs["input"] == 'user = "audit-reader:secret\\"value"\n'
+
+
+def test_knox_base_url_adds_solr_collection_and_select():
+    settings = Settings(
+        solr_url="https://gateway.example:8443/gateway/cdp-proxy-api",
+        solr_collection="ranger_audits",
+    )
+    assert settings.solr_select_url.endswith("/gateway/cdp-proxy-api/solr/ranger_audits/select")
+
+
 def test_solr_filters_users_dates_and_normalizes_response(monkeypatch, tmp_path):
     captured = {}
     solr_doc = {

@@ -130,14 +130,17 @@ GET {RANGER_URL}/service/xaudit/access_audit
 GET {RANGER_URL}/service/public/v2/api/policy
 ```
 
-Como alternativa avanzada se puede seleccionar **Solr directo**:
+Como alternativa se puede seleccionar **Solr directo o publicado por Knox**:
 
 ```text
 GET https://{SOLR_SERVER}:{SOLR_PORT}/solr/{SOLR_COLLECTION}/select
+GET https://gateway:8443/gateway/cdp-proxy-api/solr/ranger_audits/select
 ```
 
-Kerberos está desactivado por defecto. Solo se ejecuta `kinit` y se añade
-`curl --negotiate` cuando el interruptor Kerberos está activado.
+Solr admite acceso sin autenticación, autenticación Basic con usuario y
+contraseña, o Kerberos/SPNEGO. La credencial Basic se entrega a `curl` por
+entrada estándar para que no aparezca en la lista de procesos. Kerberos está
+desactivado por defecto; solo se ejecuta `kinit` cuando su interruptor está activo.
 
 ### 4.3 Modelo LLM
 
@@ -335,12 +338,24 @@ Esto permite usar después esa misma base para consultar políticas.
 | Campo | Descripción |
 |---|---|
 | Origen | API Ranger vía Knox o Solr directo |
+| URL Solr / Knox API | URL completa, recomendada para `cdp-proxy-api`; tiene prioridad sobre servidor y puerto |
+| Autenticación Solr | sin autenticación o usuario y contraseña |
+| Usuario / contraseña Solr | cuenta técnica aceptada por Knox; el secreto no vuelve al navegador |
 | Servidor Solr | DNS/IP sin protocolo |
 | Puerto | puerto HTTPS de Solr |
 | Colección | normalmente `ranger_audits` |
 
 Aunque Solr no esté disponible, la aplicación puede trabajar con la API de
 Ranger cuando el origen seleccionado es `ranger`.
+
+Para el entorno de Madrid, la URL REST es la variante sin `#/` de la interfaz:
+
+```text
+https://h12cdpmp01x.salud.madrid.org:8443/gateway/cdp-proxy-api/solr/ranger_audits/select
+```
+
+La ruta `cdp-proxy/solr/#/` es la interfaz web. El fragmento `#/` pertenece al
+navegador y no se envía en una llamada REST.
 
 ### 7.3 Kerberos opcional
 
@@ -404,6 +419,10 @@ AUDIT_SOURCE=ranger
 SOLR_SERVER=
 SOLR_PORT=8995
 SOLR_COLLECTION=ranger_audits
+SOLR_URL=https://gateway.example:8443/gateway/cdp-proxy-api/solr/ranger_audits/select
+SOLR_AUTH_TYPE=basic
+SOLR_USER=usuario-tecnico
+SOLR_PASSWORD=
 
 KERBEROS_ENABLED=false
 KERBEROS_USER=

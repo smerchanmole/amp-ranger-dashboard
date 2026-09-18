@@ -101,6 +101,76 @@ def audit_row(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _governed_dimensions(item: dict[str, Any]) -> list[tuple[str, str, str, str]]:
+    """Devuelve (dimensión, clave, nombre, contexto) para un evento Ranger.
+
+    Las columnas contribuyen también a su tabla, que es la unidad útil para
+    detectar concentración. Las rutas HDFS se mantienen como carpetas/rutas y
+    nunca se reinterpretan como objetos Hive.
+    """
+    raw = str(item.get("resourcePath") or item.get("resource") or "desconocido")
+    resource_type = str(item.get("resourceType") or item.get("resType") or "").casefold()
+    service = str(item.get("repoName") or item.get("serviceType") or "desconocido")
+    parts = [part for part in raw.replace("\\", "/").strip("/").split("/") if part]
+    rows: list[tuple[str, str, str, str]] = []
+
+    is_column = "column" in resource_type
+    is_table = "table" in resource_type or is_column
+    if is_table and len(parts) >= 2:
+        database, table = parts[0], parts[1]
+        rows.append(("tables", f"{service}\0{database}\0{table}", f"{database}.{table}", service))
+    if is_column and len(parts) >= 3:
+        column = "/".join(parts[2:])
+        rows.append(("columns", f"{service}\0{database}\0{table}\0{column}", f"{database}.{table}.{column}", service))
+
+    is_hdfs = "hdfs" in service.casefold() or any(token in resource_type for token in ("path", "directory", "folder"))
+    if is_hdfs:
+        name, context = resource_identity(raw)
+        rows.append(("folders", f"{service}\0{raw}", name, f"{service} · {context}"))
+
+    operation = str(item.get("accessType") or item.get("action") or "desconocida")
+    rows.append(("operations", operation, operation, "Todos los servicios"))
+    return rows
+
+
+def _access_rankings(audits: list[dict[str, Any]], limit: int = 8) -> list[dict[str, Any]]:
+    labels = {"folders": "Carpetas", "tables": "Tablas", "columns": "Columnas", "operations": "Operaciones"}
+    stats: dict[str, dict[str, dict[str, Any]]] = {key: {} for key in labels}
+    for item in audits:
+        user = str(item.get("requestUser") or "desconocido")
+        denied = not _allowed(item)
+        for dimension, key, name, context in _governed_dimensions(item):
+            row = stats[dimension].setdefault(key, {
+                "name": name, "context": context, "value": 0, "denied": 0,
+                "users": Counter(), "deniedUsers": Counter(),
+            })
+            row["value"] += 1
+            row["users"][user] += 1
+            if denied:
+                row["denied"] += 1
+                row["deniedUsers"][user] += 1
+
+    def serialize(row: dict[str, Any], denied: bool = False) -> dict[str, Any]:
+        counter = row["deniedUsers"] if denied else row["users"]
+        return {
+            "name": row["name"], "context": row["context"],
+            "value": row["denied"] if denied else row["value"],
+            "denied": row["denied"], "users": _top(counter, len(counter)),
+        }
+
+    result = []
+    for dimension, label in labels.items():
+        rows = list(stats[dimension].values())
+        used = sorted(rows, key=lambda row: (-row["value"], row["name"]))[:limit]
+        denied = sorted((row for row in rows if row["denied"]), key=lambda row: (-row["denied"], row["name"]))[:limit]
+        result.append({
+            "id": dimension, "label": label,
+            "used": [serialize(row) for row in used],
+            "denied": [serialize(row, denied=True) for row in denied],
+        })
+    return result
+
+
 def dashboard(audits: list[dict[str, Any]], policies: list[dict[str, Any]], services: list[str]) -> dict[str, Any]:
     """Construye la vista gobernada que consumen dashboard y agente.
 
@@ -170,6 +240,7 @@ def dashboard(audits: list[dict[str, Any]], policies: list[dict[str, Any]], serv
         "accessesByUser": _top(accesses_by_user, 15),
         "serviceDistribution": _top(service_distribution, max(8, len(services))),
         "operations": _top(operations),
+        "accessRankings": _access_rankings(audits),
         "sampleSize": len(audits),
         "configuredServices": services,
         "recentAllowed": [audit_row(item) for item in sorted_audits if _allowed(item)][:100],

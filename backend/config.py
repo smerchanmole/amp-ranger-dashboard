@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     solr_server: str = "base2.mole4.local"
     solr_port: int = 8995
     solr_collection: str = "ranger_audits"
+    # URL completa opcional. Es la forma recomendada para Knox, por ejemplo:
+    # https://gateway:8443/gateway/cdp-proxy-api/solr/ranger_audits/select
+    solr_url: str = ""
+    solr_auth_type: str = "none"
+    solr_user: str = ""
+    solr_password: str = ""
     solr_verify_ssl: bool = False
     solr_timeout_seconds: int = 90
     kerberos_enabled: bool = False
@@ -108,7 +114,21 @@ class Settings(BaseSettings):
 
     @property
     def solr_select_url(self) -> str:
-        return f"https://{self.solr_server}:{self.solr_port}/solr/{self.solr_collection}/select"
+        configured = self.solr_url.strip().split("#", 1)[0].rstrip("/")
+        if not configured:
+            return f"https://{self.solr_server}:{self.solr_port}/solr/{self.solr_collection}/select"
+        if configured.endswith("/select"):
+            return configured
+        if configured.endswith("/solr"):
+            return f"{configured}/{self.solr_collection}/select"
+        if configured.endswith("/cdp-proxy-api"):
+            return f"{configured}/solr/{self.solr_collection}/select"
+        return f"{configured}/select"
+
+    @property
+    def effective_solr_auth_type(self) -> str:
+        """Conserva compatibilidad con despliegues que solo usaban el flag Kerberos."""
+        return "kerberos" if self.kerberos_enabled else self.solr_auth_type.strip().casefold()
 
 
 @lru_cache

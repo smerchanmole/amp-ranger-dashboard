@@ -1,7 +1,7 @@
 import React, {useEffect, useState} from 'react';
 import {createRoot} from 'react-dom/client';
-import {AreaChart, Area, BarChart, Bar, CartesianGrid, Cell, PieChart, Pie, ResponsiveContainer, Tooltip, XAxis, YAxis} from 'recharts';
-import {Activity, AlertTriangle, CheckCircle2, CircleHelp, Clock3, FileClock, RefreshCw, Send, Settings, Settings2, ShieldCheck, Users, X, XCircle} from 'lucide-react';
+import {AreaChart, Area, BarChart, Bar, CartesianGrid, Cell, Legend, LineChart, Line, PieChart, Pie, ResponsiveContainer, Tooltip, XAxis, YAxis} from 'recharts';
+import {Activity, AlertTriangle, CheckCircle2, CircleHelp, Clock3, Columns3, Database, FileClock, FolderTree, MousePointerClick, RefreshCw, Send, Settings, Settings2, ShieldCheck, Users, X, XCircle} from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
 import {CircleMarker, MapContainer, Popup, TileLayer, useMap} from 'react-leaflet';
 import rangerHero from '../../topo_ranger_apache.png';
@@ -95,6 +95,45 @@ function IdentityImpact({items=[], mode='access'}) {
   </div>;
 }
 
+const DIMENSION_ICONS={folders:FolderTree,tables:Database,columns:Columns3,operations:MousePointerClick};
+
+function RankingLane({title, subtitle, items=[], tone}) {
+  return <section className={`ranking-lane ${tone}`}>
+    <header><div><span>{title}</span><small>{subtitle}</small></div><strong>{number(items.reduce((sum,item)=>sum+item.value,0))}</strong></header>
+    {items.length?<ol>{items.map((item,index)=><li key={`${item.name}-${item.context}`}>
+      <details>
+        <summary>
+          <span className="ranking-position">{String(index+1).padStart(2,'0')}</span>
+          <span className="ranking-asset"><b>{item.name}</b><small>{item.context}</small></span>
+          <span className="ranking-total"><strong>{number(item.value)}</strong><small>{tone==='denied'?'denegados':'accesos'}</small></span>
+        </summary>
+        <div className="ranking-users">
+          <p><Users size={14}/> Usuarios y número de accesos</p>
+          <div>{item.users.map(user=><span key={user.name}><b>{user.name}</b><em>{number(user.value)}</em></span>)}</div>
+        </div>
+      </details>
+    </li>)}</ol>:<Empty>Sin accesos {tone==='denied'?'denegados ':''}para esta dimensión.</Empty>}
+  </section>;
+}
+
+function AccessRankings({dimensions=[]}) {
+  const initial=dimensions.find(item=>item.used?.length)?.id || dimensions[0]?.id || 'folders';
+  const [active,setActive]=useState(initial);
+  const selected=dimensions.find(item=>item.id===active) || dimensions[0];
+  if (!selected) return null;
+  return <section className="access-explorer">
+    <header className="access-explorer-heading"><div><p>EXPOSICIÓN Y DEMANDA</p><h2>Activos con mayor presión de acceso</h2><span>Compara uso y denegaciones; despliega cada fila para ver qué usuarios participaron y cuántas veces.</span></div></header>
+    <div className="dimension-tabs" role="tablist" aria-label="Tipo de activo">{dimensions.map(dimension=>{
+      const Icon=DIMENSION_ICONS[dimension.id] || Activity;
+      return <button key={dimension.id} type="button" role="tab" aria-selected={dimension.id===selected.id} onClick={()=>setActive(dimension.id)}><Icon size={16}/>{dimension.label}</button>;
+    })}</div>
+    <div className="ranking-compare">
+      <RankingLane title="Más usados" subtitle={`${selected.label} con mayor volumen`} items={selected.used} tone="used"/>
+      <RankingLane title="Más denegados" subtitle={`${selected.label} con más rechazos`} items={selected.denied} tone="denied"/>
+    </div>
+  </section>;
+}
+
 function MapViewport({points}) {
   // Gobierno de localización: el encuadre se deriva de la evidencia y añade
   // un margen físico aproximado; no presupone que todos los accesos son locales.
@@ -138,11 +177,9 @@ function Dashboard({data, map}) {
     <div className="grid">
       <Panel title="Evolución de accesos" subtitle="Permitidos y denegados por día" wide>{data.timeline.length?<ResponsiveContainer width="100%" height={280}><AreaChart data={data.timeline}><CartesianGrid stroke="#CEDBE4"/><XAxis dataKey="date" tick={{fill:'#656D73'}}/><YAxis tick={{fill:'#656D73'}}/><Tooltip contentStyle={{background:'#FFFFFF',border:'1px solid #CEDBE4',color:'#000000',borderRadius:12}}/><Area type="monotone" dataKey="allowed" name="Permitidos" stroke="#5555F9" strokeWidth={3} fill="#CEDBE4"/><Area type="monotone" dataKey="denied" name="Denegados" stroke="#FF550D" strokeWidth={3} fill="#FF8856"/></AreaChart></ResponsiveContainer>:<Empty/>}</Panel>
       <Panel title="Resultado" subtitle="Distribución de decisiones"><ResponsiveContainer width="100%" height={280}><PieChart><Pie data={access} dataKey="value" innerRadius={70} outerRadius={100} paddingAngle={3}>{access.map((_,i)=><Cell key={i} fill={[COLORS[0],COLORS[3]][i]}/>)}</Pie><Tooltip/></PieChart></ResponsiveContainer><div className="legend"><i className="allow"/>Permitidos <i className="deny"/>Denegados</div></Panel>
-      <ResourceGallery title="Recursos más usados por servicio" subtitle="Un toro por servicio muestra la distribución de sus activos más consultados" groups={data.resourcesByService}/>
-      <ResourceGallery title="Recursos más usados por usuario" subtitle="La misma visión desde la identidad: qué recursos concentra cada usuario" groups={data.resourcesByUser}/>
+      <AccessRankings dimensions={data.accessRankings}/>
       <Panel title="Actividad por identidad" subtitle="Ranking proporcional de accesos y concentración de uso"><IdentityImpact items={data.accessesByUser}/></Panel>
       <Panel title="Identidades con mayor riesgo" subtitle="Denegaciones priorizadas por intensidad relativa"><IdentityImpact items={data.topDeniedUsers} mode="risk"/></Panel>
-      <Panel title="Recursos utilizados" subtitle="Nombre, base de datos o ruta y total de accesos de los últimos 7 días" full><DataTable rows={data.resourceTable}/></Panel>
       <Panel title="Origen geográfico" subtitle="Encuadre automático con unos 5 km de margen; las IP locales se agrupan en Embajadores 181" wide>{map?.databaseReady?<MapContainer center={[40.3912,-3.69233]} zoom={12} className="map"><MapViewport points={map.points}/><TileLayer attribution='&copy; OpenStreetMap' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"/>{map.points.map(p=><CircleMarker key={p.ip} center={[p.lat,p.lng]} radius={Math.max(7,Math.min(26,Math.sqrt(p.count)))} pathOptions={{color:p.local?'#FF550D':'#5555F9',fillColor:p.local?'#FF550D':'#5555F9',fillOpacity:.7}}><Popup><b>{p.city || p.country}</b><br/>{p.ip}: {p.count} accesos</Popup></CircleMarker>)}</MapContainer>:<Empty>El índice geográfico aún no está construido.</Empty>}</Panel>
       <Panel title="IPs con más denegaciones" subtitle="Origen de eventos bloqueados"><div className="rank-list">{data.topDeniedIps.map((x,i)=><div key={x.name}><span><em>{i+1}</em>{x.name}</span><strong>{number(x.value)}</strong></div>)}</div></Panel>
       <Panel title="Últimos 100 accesos permitidos" subtitle="Eventos OK más recientes de la muestra" full><DataTable rows={data.recentAllowed} kind="ok"/></Panel>
@@ -153,7 +190,13 @@ function Dashboard({data, map}) {
 
 function ChatChart({chart}) {
   if (!chart?.data?.length) return null;
-  return <div className="chat-chart"><strong>{chart.title}</strong><ResponsiveContainer width="100%" height={Math.min(300,Math.max(150,chart.data.length*34))}><BarChart data={chart.data.slice(0,10)} layout="vertical" margin={{left:8,right:18}}><XAxis type="number" tick={{fill:'#656D73'}} allowDecimals={false}/><YAxis type="category" dataKey="name" width={115} tick={{fill:'#000000'}}/><Tooltip/><Bar dataKey="value" fill="#5555F9" radius={[0,7,7,0]}/></BarChart></ResponsiveContainer></div>;
+  const data=chart.data.slice(0,20); const series=chart.series || [];
+  let visual;
+  if(chart.type==='donut') visual=<PieChart><Pie data={data} dataKey="value" nameKey="name" innerRadius="57%" outerRadius="82%" paddingAngle={2}>{data.map((_,i)=><Cell key={i} fill={COLORS[i%COLORS.length]}/>)}</Pie><Tooltip formatter={value=>number(value)}/><Legend/></PieChart>;
+  else if(chart.type==='line') visual=<LineChart data={data} margin={{left:4,right:16,bottom:4}}><CartesianGrid stroke="#CEDBE4"/><XAxis dataKey="name" tick={{fill:'#656D73',fontSize:10}}/><YAxis tick={{fill:'#656D73'}} allowDecimals={false}/><Tooltip/><Legend/>{series.map((item,i)=><Line key={item.key} type="monotone" dataKey={item.key} name={item.name} stroke={COLORS[(i+2)%COLORS.length]} strokeWidth={3} dot={false}/>)}</LineChart>;
+  else if(chart.type==='column'||chart.type==='stacked-column') visual=<BarChart data={data} margin={{left:4,right:10,bottom:10}}><CartesianGrid stroke="#CEDBE4" vertical={false}/><XAxis dataKey="name" tick={{fill:'#656D73',fontSize:10}}/><YAxis tick={{fill:'#656D73'}} allowDecimals={false}/><Tooltip/><Legend/>{chart.type==='stacked-column'?series.map((item,i)=><Bar key={item.key} dataKey={item.key} name={item.name} stackId="total" fill={COLORS[i%COLORS.length]}/>):<Bar dataKey="value" name="Accesos" fill="#5555F9" radius={[7,7,0,0]}/>}</BarChart>;
+  else visual=<BarChart data={data.slice(0,10)} layout="vertical" margin={{left:8,right:18}}><XAxis type="number" tick={{fill:'#656D73'}} allowDecimals={false}/><YAxis type="category" dataKey="name" width={115} tick={{fill:'#000000'}}/><Tooltip/><Bar dataKey="value" fill="#5555F9" radius={[0,7,7,0]}/></BarChart>;
+  return <div className="chat-chart"><strong>{chart.title}</strong><ResponsiveContainer width="100%" height={chart.type==='line'||chart.type==='stacked-column'?280:Math.min(320,Math.max(190,data.length*30))}>{visual}</ResponsiveContainer></div>;
 }
 
 function AgentSettings({config, close, saved}) {
@@ -185,10 +228,10 @@ function AgentSettings({config, close, saved}) {
 function Chat({period, excludeInternal, sampleSize, provider, model, agentConfig, agentSaved}) {
   // El alcance visual (periodo, identidades y muestra) también viaja al chat;
   // así una respuesta nunca mezcla universos distintos a los del dashboard.
-  const [messages,setMessages]=useState([{role:'bot',text:'Soy el analista de seguridad de Apache Ranger. Consulto auditorías de solo lectura en Solr mediante Kerberos y políticas mediante la API GET de Ranger. Puedo cruzar accesos, usuarios externos, servicios, operaciones, recursos e IP, y responder con texto, tabla o gráfica. Nunca modifico Ranger.'}]);
+  const [messages,setMessages]=useState([{role:'bot',text:'Soy el analista de seguridad de Apache Ranger. Trabajo con la fuente de auditoría activa: API Ranger o Solr, tanto directo como a través de Knox. Respondo primero con un resumen, después con la tabla de evidencia y, cuando aporta valor, con la visualización más adecuada. Nunca modifico Ranger.'}]);
   const [text,setText]=useState(''); const [busy,setBusy]=useState(false); const [agentOpen,setAgentOpen]=useState(false);
-  const send=async()=>{if(!text.trim()||busy)return;const q=text.trim();setMessages(m=>[...m,{role:'user',text:q}]);setText('');setBusy(true);try{const r=await request('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q,period,exclude_internal:excludeInternal,sample_size:sampleSize,provider,model})});setMessages(m=>[...m,{role:'bot',text:r.answer,table:r.table,chart:r.chart,provider:r.provider,model:r.model,warning:r.gatewayWarning}]);}catch(e){setMessages(m=>[...m,{role:'error',text:e.message}]);}finally{setBusy(false)}};
-  return <section className="chat"><div className="chat-title"><div className="bot-icon"><ShieldCheck/></div><div><h2>Analista Ranger</h2><p><span/> Agente híbrido gobernado · {provider} / {model} · Solo lectura</p></div><button className="chat-settings-button" onClick={()=>setAgentOpen(true)} title="Configurar agente"><Settings2 size={18}/> Configurar agente</button></div><div className="messages">{messages.map((m,i)=><div key={i} className={`message ${m.role}`}><p>{m.text}</p>{m.model&&<small className="model-badge">Proveedor: {m.provider} · Modelo: {m.model}{m.warning?' · respuesta determinista de respaldo':''}</small>}{m.chart&&<ChatChart chart={m.chart}/>} {m.table?.length>0&&<DataTable rows={m.table} limit={20}/>}</div>)}{busy&&<div className="message bot dots">Consultando {model} mediante {provider}…</div>}</div><div className="suggestions">{['¿Qué tabla tiene más accesos rechazados?','¿Qué columna se está rechazando más?','Dime los accesos de la última hora','Usuarios que han accedido y a qué servicio','¿Qué APIs puedes llamar?'].map(q=><button key={q} onClick={()=>setText(q)}>{q}</button>)}</div><div className="composer"><input value={text} onChange={e=>setText(e.target.value)} onKeyDown={e=>e.key==='Enter'&&send()} placeholder="Pregunta por tablas, columnas, usuarios, servicios o políticas…"/><button onClick={send} disabled={busy} aria-label="Enviar pregunta"><Send size={18}/></button></div>{agentOpen&&agentConfig&&<AgentSettings config={agentConfig} close={()=>setAgentOpen(false)} saved={agentSaved}/>}</section>;
+  const send=async()=>{if(!text.trim()||busy)return;const q=text.trim();setMessages(m=>[...m,{role:'user',text:q}]);setText('');setBusy(true);try{const r=await request('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q,period,exclude_internal:excludeInternal,sample_size:sampleSize,provider,model})});setMessages(m=>[...m,{role:'bot',text:r.answer,table:r.table,chart:r.chart,provider:r.provider,model:r.model,source:r.auditSource,warning:r.gatewayWarning}]);}catch(e){setMessages(m=>[...m,{role:'error',text:e.message}]);}finally{setBusy(false)}};
+  return <section className="chat"><div className="chat-title"><div className="bot-icon"><ShieldCheck/></div><div><h2>Analista Ranger</h2><p><span/> Agente híbrido gobernado · {provider} / {model} · Solo lectura</p></div><button className="chat-settings-button" onClick={()=>setAgentOpen(true)} title="Configurar agente"><Settings2 size={18}/> Configurar agente</button></div><div className="messages">{messages.map((m,i)=><div key={i} className={`message ${m.role}`}><p>{m.text}</p>{m.model&&<small className="model-badge">Fuente: {m.source==='solr'?'Solr':'API Ranger'} · Proveedor: {m.provider} · Modelo: {m.model}{m.warning?' · respuesta determinista de respaldo':''}</small>}{m.table?.length>0&&<DataTable rows={m.table} limit={20}/>} {m.chart&&<ChatChart chart={m.chart}/>}</div>)}{busy&&<div className="message bot dots">Consultando {model} mediante {provider}…</div>}</div><div className="suggestions">{['¿Cómo evoluciona el acceso por día?','¿Qué tabla tiene más accesos rechazados?','¿Qué columna se está rechazando más?','Dime los accesos de la última hora','Usuarios que han accedido y a qué servicio'].map(q=><button key={q} onClick={()=>setText(q)}>{q}</button>)}</div><div className="composer"><input value={text} onChange={e=>setText(e.target.value)} onKeyDown={e=>e.key==='Enter'&&send()} placeholder="Pregunta por tablas, columnas, usuarios, servicios o políticas…"/><button onClick={send} disabled={busy} aria-label="Enviar pregunta"><Send size={18}/></button></div>{agentOpen&&agentConfig&&<AgentSettings config={agentConfig} close={()=>setAgentOpen(false)} saved={agentSaved}/>}</section>;
 }
 
 function Logs({close}) {const [items,setItems]=useState([]);useEffect(()=>{request('/logs').then(x=>setItems(x.items))},[]);return <div className="modal"><div className="log-panel"><header><h2>Registro de actividad</h2><button onClick={close}>Cerrar</button></header>{items.length?items.map((x,i)=><pre key={i}>{JSON.stringify(x,null,2)}</pre>):<Empty>No hay consultas registradas todavía.</Empty>}</div></div>;}
@@ -219,7 +262,9 @@ function Configuration({config, close, saved}) {
   const [form,setForm]=useState({
     ranger_url:config.ranger.url,ranger_auth_type:config.ranger.authType,ranger_user:config.ranger.user,
     ranger_password:'',ranger_token:'',audit_source:config.audit.source,solr_server:config.audit.server,
-    solr_port:config.audit.port,solr_collection:config.audit.collection,ai_gateway_api_url:config.llm.apiUrl,
+    solr_port:config.audit.port,solr_collection:config.audit.collection,solr_url:config.audit.url || '',
+    solr_auth_type:config.audit.authType || 'none',solr_user:config.audit.user || '',solr_password:'',
+    ai_gateway_api_url:config.llm.apiUrl,
     kerberos_enabled:config.kerberos.enabled,kerberos_user:config.kerberos.user,
     kerberos_realm:config.kerberos.realm,kerberos_kdc:config.kerberos.kdc,
     kerberos_admin_server:config.kerberos.adminServer,kerberos_password:'',
@@ -240,10 +285,15 @@ function Configuration({config, close, saved}) {
       <label><FieldTitle help="Token Bearer aceptado por el endpoint de Ranger o Knox. Solo se utiliza con la autenticación Bearer." example="eyJhbGciOi...">Token Ranger</FieldTitle><input type="password" value={form.ranger_token} onChange={e=>set('ranger_token',e.target.value)} placeholder={config.ranger.hasToken?'Configurado · dejar vacío para conservar':'Bearer token opcional'}/></label>
     </fieldset>
     <fieldset><legend>Fuente de auditoría</legend>
-      <label><FieldTitle help="Servicio desde el que se leerán las auditorías: la API de Ranger a través de Knox o una conexión directa a Solr." example="API Ranger vía Knox">Origen</FieldTitle><select value={form.audit_source} onChange={e=>set('audit_source',e.target.value)}><option value="ranger">API Ranger vía Knox</option><option value="solr">Solr directo (avanzado)</option></select></label>
-      <label><FieldTitle help="Nombre DNS o IP del servidor Solr, sin protocolo ni ruta. Solo es necesario si seleccionas Solr directo." example="solr-master.example.internal">Servidor Solr</FieldTitle><input value={form.solr_server} onChange={e=>set('solr_server',e.target.value)}/></label>
+      <label><FieldTitle help="Servicio desde el que se leerán las auditorías. Solr admite tanto conexión directa como publicación mediante Knox cdp-proxy-api." example="Solr vía Knox">Origen</FieldTitle><select value={form.audit_source} onChange={e=>set('audit_source',e.target.value)}><option value="ranger">API Ranger vía Knox</option><option value="solr">Solr directo o vía Knox</option></select></label>
+      <label><FieldTitle help="Método de acceso a Solr. En cdp-proxy-api normalmente se utiliza usuario y contraseña. Kerberos se activa en el bloque siguiente." example="Usuario y contraseña">Autenticación Solr</FieldTitle><select value={form.solr_auth_type} onChange={e=>set('solr_auth_type',e.target.value)}><option value="none">Sin autenticación</option><option value="basic">Usuario y contraseña</option></select></label>
+      <label className="span-2"><FieldTitle help="URL completa del endpoint select. Tiene prioridad sobre servidor y puerto. Se elimina cualquier fragmento #/ propio de la interfaz web." example="https://h12cdpmp01x.salud.madrid.org:8443/gateway/cdp-proxy-api/solr/ranger_audits/select">URL de Solr / Knox API</FieldTitle><input value={form.solr_url} onChange={e=>set('solr_url',e.target.value)} placeholder="https://.../gateway/cdp-proxy-api/solr/ranger_audits/select"/></label>
+      <label><FieldTitle help="Usuario técnico o de workload aceptado por Knox para cdp-proxy-api." example="usuario-workload">Usuario Solr</FieldTitle><input disabled={form.solr_auth_type!=='basic'} value={form.solr_user} onChange={e=>set('solr_user',e.target.value)}/></label>
+      <label><FieldTitle help="Contraseña de Knox/Solr. Déjala vacía al editar para conservar la ya configurada. Nunca vuelve al navegador." example="WORKLOAD_PASSWORD">Contraseña Solr</FieldTitle><input disabled={form.solr_auth_type!=='basic'} type="password" value={form.solr_password} onChange={e=>set('solr_password',e.target.value)} placeholder={config.audit.hasPassword?'Configurada · dejar vacío para conservar':'Introducir contraseña'}/></label>
+      <label><FieldTitle help="Nombre DNS o IP para conexión directa. Solo se usa cuando la URL completa está vacía." example="solr-master.example.internal">Servidor Solr (alternativo)</FieldTitle><input value={form.solr_server} onChange={e=>set('solr_server',e.target.value)}/></label>
       <label><FieldTitle help="Puerto en el que escucha Solr. Debe ser un número entre 1 y 65535." example="8995">Puerto</FieldTitle><input type="number" value={form.solr_port} onChange={e=>set('solr_port',e.target.value)}/></label>
       <label><FieldTitle help="Nombre exacto de la colección de Solr que contiene las auditorías de Apache Ranger." example="ranger_audits">Colección</FieldTitle><input value={form.solr_collection} onChange={e=>set('solr_collection',e.target.value)}/></label>
+      <p className="secret-state span-2">Endpoint efectivo: <strong>{form.solr_url || `https://${form.solr_server}:${form.solr_port}/solr/${form.solr_collection}/select`}</strong></p>
     </fieldset>
     <fieldset className={`kerberos-settings ${form.kerberos_enabled?'enabled':'disabled'}`}><legend>Kerberos (opcional)</legend>
       <label className="kerberos-toggle span-2"><input type="checkbox" checked={form.kerberos_enabled} onChange={e=>set('kerberos_enabled',e.target.checked)}/><span><strong>{form.kerberos_enabled?'Kerberos activado':'Kerberos desactivado'}</strong><small>Para Knox normalmente debe permanecer desactivado.</small></span><FieldHelp example="desactivado cuando Ranger se publica mediante Knox">Activa kinit y la negociación SPNEGO únicamente si conectas directamente con un servicio protegido por Kerberos.</FieldHelp></label>
@@ -296,7 +346,8 @@ function App(){
   if(auth===undefined)return <div className="auth-loading"><RefreshCw className="spin"/>Validando sesión segura…</div>;
   if(!auth)return <LoginScreen onLogin={setAuth}/>;
   const configSaved=config=>{setRuntimeConfig(config);applyAgentConfig(config.agent);load()};
-  return <main><nav><div className="brand"><div><ShieldCheck/></div><span>RANGER<strong>INTELLIGENCE</strong></span></div><div className="nav-actions"><span className="signed-user">{auth.username}</span><label className="internal-toggle"><input type="checkbox" checked={excludeInternal} onChange={e=>setExcludeInternal(e.target.checked)}/><span/>Excluir usuarios internos</label><select value={model} onChange={e=>setModel(e.target.value)} title={`Modelo de ${provider}`}>{models.map(item=><option key={item} value={item}>LLM: {item}</option>)}</select><select className="sample-select" value={sampleSize} onChange={e=>setSampleSize(Number(e.target.value))} title="Tamaño de la muestra"><option value="1000">Muestra: 1.000</option><option value="5000">Muestra: 5.000</option><option value="10000">Muestra: 10.000</option><option value="30000">Muestra: 30.000</option><option value="50000">Muestra: 50.000</option><option value="100000">Muestra: 100.000</option></select><select value={period} onChange={e=>setPeriod(e.target.value)}><option value="24h">Últimas 24 horas</option><option value="7d">Últimos 7 días</option><option value="30d">Últimos 30 días</option><option value="3m">Últimos 3 meses</option><option value="6m">Últimos 6 meses</option></select><button onClick={load} title="Actualizar"><RefreshCw size={17}/></button><button onClick={()=>setConfiguration(true)}><Settings size={17}/> Configuración</button><button onClick={()=>setLogs(true)}><FileClock size={17}/> Ver log</button><button onClick={logout}>Salir</button></div></nav><header className="hero"><div className="hero-title"><div className="hero-logo-shell"><img src={rangerHero} alt="Agente del centro de operaciones Ranger"/></div><div><p>Security overview</p><h1>Centro de control</h1><span>Visibilidad unificada de accesos y políticas de Apache Ranger.</span></div></div><div className="status"><i/> Auditoría {runtimeConfig?.audit?.source || 'ranger'} · {runtimeConfig?.ranger?.url || 'Knox'} · {excludeInternal?'Usuarios internos excluidos':'Todos los usuarios'}</div></header>{error?<div className="alert"><AlertTriangle/> {error}</div>:<Dashboard data={data} map={map}/>}<Chat period={period} excludeInternal={excludeInternal} sampleSize={sampleSize} provider={provider} model={model} agentConfig={runtimeConfig?.agent} agentSaved={applyAgentConfig}/><footer>Muestra de {number(sampleSize)} auditorías · Consultas de solo lectura · {data?.configuredServices?.join(' · ')}</footer>{logs&&<Logs close={()=>setLogs(false)}/>} {configuration&&runtimeConfig&&<Configuration config={runtimeConfig} close={()=>setConfiguration(false)} saved={configSaved}/>}</main>;
+  const auditEndpoint=runtimeConfig?.audit?.source==='solr' ? (runtimeConfig.audit.selectUrl || runtimeConfig.audit.url || runtimeConfig.audit.server) : runtimeConfig?.ranger?.url;
+  return <main><nav><div className="brand"><div><ShieldCheck/></div><span>RANGER<strong>INTELLIGENCE</strong></span></div><div className="nav-actions"><span className="signed-user">{auth.username}</span><label className="internal-toggle"><input type="checkbox" checked={excludeInternal} onChange={e=>setExcludeInternal(e.target.checked)}/><span/>Excluir usuarios internos</label><select value={model} onChange={e=>setModel(e.target.value)} title={`Modelo de ${provider}`}>{models.map(item=><option key={item} value={item}>LLM: {item}</option>)}</select><select className="sample-select" value={sampleSize} onChange={e=>setSampleSize(Number(e.target.value))} title="Tamaño de la muestra"><option value="1000">Muestra: 1.000</option><option value="5000">Muestra: 5.000</option><option value="10000">Muestra: 10.000</option><option value="30000">Muestra: 30.000</option><option value="50000">Muestra: 50.000</option><option value="100000">Muestra: 100.000</option></select><select value={period} onChange={e=>setPeriod(e.target.value)}><option value="24h">Últimas 24 horas</option><option value="7d">Últimos 7 días</option><option value="30d">Últimos 30 días</option><option value="3m">Últimos 3 meses</option><option value="6m">Últimos 6 meses</option></select><button onClick={load} title="Actualizar"><RefreshCw size={17}/></button><button onClick={()=>setConfiguration(true)}><Settings size={17}/> Configuración</button><button onClick={()=>setLogs(true)}><FileClock size={17}/> Ver log</button><button onClick={logout}>Salir</button></div></nav><header className="hero"><div className="hero-title"><div className="hero-logo-shell"><img src={rangerHero} alt="Agente del centro de operaciones Ranger"/></div><div><p>Security overview</p><h1>Centro de control</h1><span>Visibilidad unificada de accesos y políticas de Apache Ranger.</span></div></div><div className="status"><i/> Auditoría {runtimeConfig?.audit?.source || 'ranger'} · {auditEndpoint || 'Knox'} · {excludeInternal?'Usuarios internos excluidos':'Todos los usuarios'}</div></header>{error?<div className="alert"><AlertTriangle/> {error}</div>:<Dashboard data={data} map={map}/>}<Chat period={period} excludeInternal={excludeInternal} sampleSize={sampleSize} provider={provider} model={model} agentConfig={runtimeConfig?.agent} agentSaved={applyAgentConfig}/><footer>Muestra de {number(sampleSize)} auditorías · Consultas de solo lectura · {data?.configuredServices?.join(' · ')}</footer>{logs&&<Logs close={()=>setLogs(false)}/>} {configuration&&runtimeConfig&&<Configuration config={runtimeConfig} close={()=>setConfiguration(false)} saved={configSaved}/>}</main>;
 }
 
 createRoot(document.getElementById('root')).render(<><DiagnosticsBar/><App/></>);

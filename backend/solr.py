@@ -1,4 +1,4 @@
-"""Fuente de auditoría Ranger basada directamente en Solr Kerberizado.
+"""Fuente de auditoría Ranger basada en Solr directo o publicado por Knox.
 
 Solr usa nombres de campo distintos a la API de Ranger. Este adaptador aplica
 filtros en origen y normaliza cada documento al contrato interno de la
@@ -133,7 +133,7 @@ class KerberosTicket:
 
 
 class SolrAuditClient:
-    """Consulta `ranger_audits` con SPNEGO y devuelve eventos normalizados."""
+    """Consulta `ranger_audits` con acceso anónimo, Basic o SPNEGO."""
 
     def __init__(self, settings: Settings, runner: Runner = subprocess.run):
         self.settings = settings
@@ -172,12 +172,28 @@ class SolrAuditClient:
         }
 
     def _curl(self, params: list[tuple[str, str]]) -> dict[str, Any]:
-        self.ticket.ensure()
+        auth_type = self.settings.effective_solr_auth_type
+        if auth_type not in {"none", "basic", "kerberos"}:
+            raise SolrError("SOLR_AUTH_TYPE debe ser none, basic o kerberos")
+        if auth_type == "kerberos":
+            self.ticket.ensure()
         command = [
             "curl", "--silent", "--show-error", "--fail-with-body",
         ]
-        if self.settings.kerberos_enabled:
+        curl_config = None
+        if auth_type == "kerberos":
             command.extend(["--negotiate", "-u", ":"])
+        elif auth_type == "basic":
+            username = self.settings.solr_user.strip()
+            password = self.settings.solr_password
+            if not username or not password:
+                raise SolrError("Solr Basic requiere usuario y contraseña")
+            if any(char in username + password for char in "\r\n"):
+                raise SolrError("Las credenciales de Solr contienen caracteres no válidos")
+            # La credencial viaja por stdin y no aparece en la lista de procesos.
+            escaped = f"{username}:{password}".replace("\\", "\\\\").replace('"', '\\"')
+            command.extend(["--basic", "--config", "-"])
+            curl_config = f'user = "{escaped}"\n'
         command.extend(["-G", "--max-time", str(self.settings.solr_timeout_seconds)])
         if not self.settings.solr_verify_ssl:
             command.append("-k")
@@ -186,7 +202,9 @@ class SolrAuditClient:
             command.extend(["--data-urlencode", f"{key}={value}"])
         try:
             kwargs = {"text": True, "capture_output": True, "check": False}
-            if self.settings.kerberos_enabled:
+            if curl_config is not None:
+                kwargs["input"] = curl_config
+            if auth_type == "kerberos":
                 kwargs["env"] = self.ticket.environment
             result = self.runner(command, **kwargs)
         except OSError as exc:
