@@ -12,6 +12,13 @@ def test_scrypt_hash_never_contains_plain_password():
     assert not verify_password("wrong", encoded)
 
 
+def test_initial_shared_login_is_admin():
+    settings = Settings(_env_file=None)
+    assert settings.app_auth_username == "admin"
+    assert verify_password("admin", settings.app_auth_password_hash)
+    assert not verify_password("smerchan", settings.app_auth_password_hash)
+
+
 def test_signed_session_rejects_tampering():
     settings = Settings(app_auth_username="user", app_session_secret="secret", app_session_hours=1)
     token = create_session("user", settings)

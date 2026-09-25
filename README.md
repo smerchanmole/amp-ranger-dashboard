@@ -472,6 +472,11 @@ cuando `APP_AUTH_PASSWORD_HASH` está configurado. La sesión local usa:
 - duración configurable;
 - limitación de intentos.
 
+El acceso local inicial incluido para compartir la aplicación es
+`admin` / `admin`. La contraseña se almacena como hash scrypt; para cualquier
+despliegue estable debe sustituirse por una contraseña propia antes de exponer
+la aplicación fuera de un entorno controlado.
+
 Generación local del hash:
 
 ```bash

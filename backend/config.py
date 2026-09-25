@@ -47,8 +47,10 @@ class Settings(BaseSettings):
     geo_csv_path: Path = Path("geolocationDatabaseIPv4.csv")
     geo_db_path: Path = Path("data/geolocation.sqlite")
     cors_origins: str = "http://localhost:5173"
-    app_auth_username: str = "smerchan"
-    app_auth_password_hash: str = ""
+    app_auth_username: str = "admin"
+    # Hash scrypt de la contraseña inicial "admin". Puede sustituirse de forma
+    # segura mediante APP_AUTH_PASSWORD_HASH en el entorno de despliegue.
+    app_auth_password_hash: str = "scrypt$16384$8$1$xXHnI-7u_69KeD3gwjwGAw$q1fzMkffjOWk8dRHX1KyZ5F9r7rpGeJCxYgEzrBlas4"
     app_session_secret: str = ""
     app_session_hours: int = 8
     app_cookie_name: str = "ranger_session"
