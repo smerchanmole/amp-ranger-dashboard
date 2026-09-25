@@ -437,6 +437,7 @@ KERBEROS_CONFIG_FILE=data/krb5_ranger_solr.conf
 
 AI_GATEWAY_API_URL=https://ml.example.cloudera.site/namespaces/serving-default/endpoints/my-model/v1
 AI_GATEWAY_TOKEN=
+AI_GATEWAY_VERIFY_SSL=false
 CDP_TOKEN=
 USE_CML_JWT=true
 CML_JWT_PATH=/tmp/jwt
@@ -452,11 +453,12 @@ SERVER_IP=127.0.0.1
 APP_PORT=8000
 ```
 
-`RANGER_VERIFY_SSL=false` y `SOLR_VERIFY_SSL=false` permiten conectar con
-certificados autofirmados. Los dos valores también pueden cambiarse en el
-formulario **Configuración**. Manténgalos en `true` cuando el certificado esté
-emitido por una CA de confianza; desactivar la verificación cifra el tráfico,
-pero no autentica la identidad del servidor.
+`RANGER_VERIFY_SSL=false`, `SOLR_VERIFY_SSL=false` y
+`AI_GATEWAY_VERIFY_SSL=false` permiten conectar con certificados autofirmados.
+Los tres valores también pueden cambiarse en el formulario **Configuración**.
+Manténgalos en `true` cuando el certificado esté emitido por una CA de
+confianza; desactivar la verificación cifra el tráfico, pero no autentica la
+identidad del servidor.
 
 No se deben versionar `.env`, `.env.cml`, tokens, contraseñas, keytabs ni
 cachés Kerberos. Ambos ficheros `.env` están incluidos en `.gitignore`.

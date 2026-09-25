@@ -97,6 +97,7 @@ class RuntimeConfigRequest(BaseModel):
     kerberos_config_file: str = Field(default="data/krb5_ranger_solr.conf", max_length=1000)
     ai_gateway_api_url: str = Field(min_length=8, max_length=1000)
     ai_gateway_token: str = Field(default="", max_length=8000)
+    ai_gateway_verify_ssl: bool = False
     cdp_token: str = Field(default="", max_length=8000)
     use_cml_jwt: bool = True
     ai_gateway_models: str = Field(min_length=1, max_length=1000)
@@ -268,6 +269,7 @@ def public_runtime_config(username: str = Depends(require_user)):
         },
         "llm": {
             "apiUrl": settings.ai_gateway_api_url,
+            "verifySsl": settings.ai_gateway_verify_ssl,
             "models": settings.gateway_models,
             "defaultModel": settings.ai_gateway_default_model,
             "hasToken": bool(settings.ai_gateway_token),

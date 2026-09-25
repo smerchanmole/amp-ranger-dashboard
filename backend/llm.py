@@ -10,10 +10,13 @@ import json
 from typing import Any
 
 import requests
+import urllib3
 
 from .chat import SYSTEM_CONTEXT
 from .agent_runtime import AgentRuntime
 from .config import Settings
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 class GatewayError(RuntimeError):
@@ -43,6 +46,7 @@ class AIGatewayClient:
                 headers=self._headers(profile),
                 timeout=self.settings.ai_gateway_timeout_seconds,
                 stream=True,
+                verify=self.settings.ai_gateway_verify_ssl,
             )
             response.raise_for_status()
             parts: list[str] = []
@@ -94,6 +98,13 @@ class AIGatewayClient:
             return "".join(parts).strip()
         except GatewayError:
             raise
+        except requests.exceptions.SSLError as exc:
+            raise GatewayError(
+                "No se pudo conectar con el modelo por un error de certificado SSL. "
+                "Si el endpoint usa un certificado autofirmado, desactiva "
+                "'Verificar certificado SSL del modelo' en Configuración > Modelo LLM. "
+                f"Detalle: {exc}"
+            ) from exc
         except (requests.RequestException, IndexError, TypeError, ValueError) as exc:
             raise GatewayError(f"Modelo no disponible: {exc}") from exc
 

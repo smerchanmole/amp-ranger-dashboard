@@ -60,6 +60,7 @@ class Settings(BaseSettings):
     server_ip: str = "127.0.0.1"
     ai_gateway_api_url: str = "https://ml-64288d82-5dd.go01-dem.ylcu-atmi.cloudera.site/namespaces/serving-default/endpoints/mpark-nemotron/v1"
     ai_gateway_token: str = ""
+    ai_gateway_verify_ssl: bool = False
     cdp_token: str = ""
     use_cml_jwt: bool = True
     cml_jwt_path: Path = Path("/tmp/jwt")

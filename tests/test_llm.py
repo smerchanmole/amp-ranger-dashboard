@@ -1,3 +1,5 @@
+import requests
+
 from backend.agent_runtime import AgentRuntime
 from backend.config import Settings
 from backend.llm import AIGatewayClient, GatewayError
@@ -33,6 +35,7 @@ def test_gateway_uses_alias_and_openai_compatible_endpoint(monkeypatch):
     assert captured["url"] == "http://gateway:4000/v1/chat/completions"
     assert captured["json"]["model"] == "qwen-local"
     assert captured["headers"]["Authorization"] == "Bearer token"
+    assert captured["verify"] is False
 
 
 def test_gateway_rejects_models_not_published_in_env():
@@ -63,6 +66,40 @@ def test_gateway_probe_performs_minimal_real_completion(monkeypatch):
     assert result == {"connected": True, "provider": "cloudera", "model": "nemotron", "tokenSource": "api_key"}
     assert captured["url"] == "https://model.example/v1/chat/completions"
     assert captured["json"]["max_tokens"] == 64
+
+
+def test_gateway_requires_trusted_certificate_when_ssl_verification_is_enabled(monkeypatch):
+    settings = Settings(
+        ai_gateway_api_url="https://model.example/v1",
+        ai_gateway_verify_ssl=True,
+        ai_gateway_default_model="nemotron",
+        ai_gateway_models="nemotron",
+    )
+    captured = {}
+
+    def fake_post(url, **kwargs):
+        captured.update(kwargs)
+        return FakeResponse()
+
+    monkeypatch.setattr("backend.llm.requests.post", fake_post)
+    AIGatewayClient(settings).probe()
+    assert captured["verify"] is True
+
+
+def test_gateway_ssl_error_explains_how_to_allow_self_signed_certificate(monkeypatch):
+    def fail_with_ssl_error(*args, **kwargs):
+        raise requests.exceptions.SSLError("self-signed certificate")
+
+    monkeypatch.setattr("backend.llm.requests.post", fail_with_ssl_error)
+    settings = Settings(ai_gateway_default_model="nemotron", ai_gateway_models="nemotron")
+
+    try:
+        AIGatewayClient(settings).probe()
+    except GatewayError as exc:
+        assert "certificado autofirmado" in str(exc)
+        assert "Verificar certificado SSL del modelo" in str(exc)
+    else:
+        raise AssertionError("El error SSL debía convertirse en un diagnóstico accionable")
 
 
 def test_gateway_empty_stream_reports_safe_response_structure(monkeypatch):

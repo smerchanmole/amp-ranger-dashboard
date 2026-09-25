@@ -265,7 +265,7 @@ function Configuration({config, close, saved}) {
     solr_port:config.audit.port,solr_collection:config.audit.collection,solr_url:config.audit.url || '',
     solr_auth_type:config.audit.authType || 'none',solr_user:config.audit.user || '',solr_password:'',
     solr_verify_ssl:Boolean(config.audit.verifySsl),
-    ai_gateway_api_url:config.llm.apiUrl,
+    ai_gateway_api_url:config.llm.apiUrl,ai_gateway_verify_ssl:Boolean(config.llm.verifySsl),
     kerberos_enabled:config.kerberos.enabled,kerberos_user:config.kerberos.user,
     kerberos_realm:config.kerberos.realm,kerberos_kdc:config.kerberos.kdc,
     kerberos_admin_server:config.kerberos.adminServer,kerberos_password:'',
@@ -313,6 +313,7 @@ function Configuration({config, close, saved}) {
     </fieldset>
     <fieldset><legend>Modelo LLM</legend>
       <label className="span-2"><FieldTitle help="URL base del endpoint de inferencia compatible con OpenAI. La aplicación añadirá /chat/completions automáticamente." example="https://ml.example.cloudera.site/namespaces/serving-default/endpoints/my-model/v1">URI compatible con OpenAI</FieldTitle><input value={form.ai_gateway_api_url} onChange={e=>set('ai_gateway_api_url',e.target.value)} required/></label>
+      <label className="tls-toggle span-2"><input type="checkbox" checked={form.ai_gateway_verify_ssl} onChange={e=>set('ai_gateway_verify_ssl',e.target.checked)}/><span><strong>Verificar certificado SSL del modelo</strong><small>{form.ai_gateway_verify_ssl?'Solo se aceptarán certificados emitidos por una CA de confianza.':'Desactivado: se permiten certificados autofirmados.'}</small></span><FieldHelp example="desactivado para un endpoint HTTPS interno con certificado autofirmado">Actívalo cuando la cadena del endpoint del modelo sea de confianza. Si está desactivado, la conexión sigue cifrada pero no se valida la identidad del servidor.</FieldHelp></label>
       <label><FieldTitle help="Clave Bearer específica del endpoint del modelo. Si ya está guardada, deja este campo vacío para conservarla." example="sk-... o el token entregado por el servicio">API key</FieldTitle><input type="password" value={form.ai_gateway_token} onChange={e=>set('ai_gateway_token',e.target.value)} placeholder={config.llm.hasToken?'Configurada y conservada':'API key opcional'}/></label>
       <label><FieldTitle help="Token de acceso de CDP que se enviará como Bearer al modelo. Tiene prioridad sobre la API key y se conserva si dejas el campo vacío." example="el valor access_token obtenido de CDP">CDP token</FieldTitle><input type="password" value={form.cdp_token} onChange={e=>set('cdp_token',e.target.value)} placeholder={config.llm.hasCdpToken?'Configurado y conservado':'CDP token opcional'}/></label>
       <label className="cml-jwt-toggle"><input type="checkbox" checked={form.use_cml_jwt} onChange={e=>set('use_cml_jwt',e.target.checked)}/><span>Usar automáticamente `/tmp/jwt` de CML {config.llm.cmlJwtAvailable?'(disponible)':'(no detectado)'}</span><FieldHelp example="/tmp/jwt con la propiedad access_token">Lee automáticamente la credencial temporal que CML crea para la sesión. Desactívalo para forzar el CDP token o la API key introducidos manualmente.</FieldHelp></label>
