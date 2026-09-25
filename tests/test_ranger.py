@@ -73,6 +73,25 @@ def test_ranger_accepts_complete_audit_endpoint_without_duplicating_path():
     assert captured["url"] == configured
 
 
+def test_ranger_allows_self_signed_certificates_when_ssl_verification_is_disabled():
+    client = RangerClient(Settings(ranger_url="https://ranger.example", ranger_verify_ssl=False))
+    captured = {}
+
+    def fake_get(url, **kwargs):
+        captured.update(kwargs)
+        return FakeResponse(status=200, body='{"totalCount": 1}', url=url)
+
+    client.session.get = fake_get
+    assert client.health()["connected"] is True
+    assert captured["verify"] is False
+
+
+def test_ranger_ssl_error_explains_how_to_allow_self_signed_certificates():
+    message = error_from(exception=requests.exceptions.SSLError("self-signed certificate"))
+    assert "certificado autofirmado" in message
+    assert "Verificar certificado SSL" in message
+
+
 def test_ranger_complete_endpoint_is_normalized_for_policy_calls():
     configured = "https://gateway.example/env/cdp-proxy-token/ranger/service/xaudit/access_audit?ignored=true"
     client = RangerClient(Settings(ranger_url=configured))

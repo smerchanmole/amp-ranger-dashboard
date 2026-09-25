@@ -385,6 +385,9 @@ footer{text-align:center;color:#71889a;font-size:11px;margin-top:22px}
 .config-panel .cml-jwt-toggle{grid-column:1/-1;display:flex;align-items:center;gap:9px;padding:10px 12px;border:1px solid #CEDBE4;border-radius:11px;background:#F3F5F7}
 .config-panel .cml-jwt-toggle>span:nth-child(2){flex:1}
 .config-panel .cml-jwt-toggle input{width:17px;min-height:17px;margin:0;accent-color:#5555F9}
+.config-panel .tls-toggle{display:flex;align-items:center;gap:11px;padding:11px 13px;border:1px solid #CEDBE4;border-radius:12px;background:#F3F5F7}
+.config-panel .tls-toggle>input{width:19px;min-height:19px;margin:0;accent-color:#5555F9}
+.config-panel .tls-toggle>span{display:grid;gap:2px;flex:1}.config-panel .tls-toggle small{color:#656D73}
 .config-panel .secret-state{grid-column:1/-1;margin:0;padding:9px 11px;border-radius:10px;background:rgba(206,219,228,.5);color:#656D73;font-size:11px}
 .config-panel .secret-state strong{color:#120046}
 .config-panel .kerberos-toggle{display:flex;align-items:center;gap:11px;padding:11px 13px;border:1px solid #CEDBE4;border-radius:12px;background:#F3F5F7}

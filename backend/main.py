@@ -76,6 +76,7 @@ class RuntimeConfigRequest(BaseModel):
     ranger_user: str = Field(default="", max_length=200)
     ranger_password: str = Field(default="", max_length=4000)
     ranger_token: str = Field(default="", max_length=8000)
+    ranger_verify_ssl: bool = False
     audit_source: Literal["ranger", "solr"] = "ranger"
     solr_server: str = Field(default="", max_length=500)
     solr_port: int = Field(default=8995, ge=1, le=65535)
@@ -84,6 +85,7 @@ class RuntimeConfigRequest(BaseModel):
     solr_auth_type: Literal["none", "basic"] = "none"
     solr_user: str = Field(default="", max_length=200)
     solr_password: str = Field(default="", max_length=4000)
+    solr_verify_ssl: bool = False
     kerberos_enabled: bool = False
     kerberos_user: str = Field(default="", max_length=200)
     kerberos_realm: str = Field(default="", max_length=200)
@@ -239,6 +241,7 @@ def public_runtime_config(username: str = Depends(require_user)):
             "user": settings.ranger_user,
             "hasPassword": bool(settings.ranger_password),
             "hasToken": bool(settings.ranger_token),
+            "verifySsl": settings.ranger_verify_ssl,
         },
         "audit": {
             "source": settings.audit_source,
@@ -250,6 +253,7 @@ def public_runtime_config(username: str = Depends(require_user)):
             "authType": settings.solr_auth_type,
             "user": settings.solr_user,
             "hasPassword": bool(settings.solr_password),
+            "verifySsl": settings.solr_verify_ssl,
         },
         "kerberos": {
             "enabled": settings.kerberos_enabled,

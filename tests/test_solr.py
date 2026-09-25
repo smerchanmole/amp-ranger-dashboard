@@ -93,6 +93,30 @@ def test_knox_base_url_adds_solr_collection_and_select():
     assert settings.solr_select_url.endswith("/gateway/cdp-proxy-api/solr/ranger_audits/select")
 
 
+def test_solr_allows_self_signed_certificates_when_ssl_verification_is_disabled():
+    calls = []
+    payload = {"responseHeader": {"status": 0}, "response": {"numFound": 0, "docs": []}}
+
+    def runner(command, **kwargs):
+        calls.append(command)
+        return completed(command, stdout=json.dumps(payload))
+
+    SolrAuditClient(Settings(solr_verify_ssl=False), runner).health()
+    assert "-k" in calls[0]
+
+
+def test_solr_requires_trusted_certificate_when_ssl_verification_is_enabled():
+    calls = []
+    payload = {"responseHeader": {"status": 0}, "response": {"numFound": 0, "docs": []}}
+
+    def runner(command, **kwargs):
+        calls.append(command)
+        return completed(command, stdout=json.dumps(payload))
+
+    SolrAuditClient(Settings(solr_verify_ssl=True), runner).health()
+    assert "-k" not in calls[0]
+
+
 def test_solr_filters_users_dates_and_normalizes_response(monkeypatch, tmp_path):
     captured = {}
     solr_doc = {

@@ -261,9 +261,10 @@ function FieldTitle({children, help, example}) {
 function Configuration({config, close, saved}) {
   const [form,setForm]=useState({
     ranger_url:config.ranger.url,ranger_auth_type:config.ranger.authType,ranger_user:config.ranger.user,
-    ranger_password:'',ranger_token:'',audit_source:config.audit.source,solr_server:config.audit.server,
+    ranger_password:'',ranger_token:'',ranger_verify_ssl:Boolean(config.ranger.verifySsl),audit_source:config.audit.source,solr_server:config.audit.server,
     solr_port:config.audit.port,solr_collection:config.audit.collection,solr_url:config.audit.url || '',
     solr_auth_type:config.audit.authType || 'none',solr_user:config.audit.user || '',solr_password:'',
+    solr_verify_ssl:Boolean(config.audit.verifySsl),
     ai_gateway_api_url:config.llm.apiUrl,
     kerberos_enabled:config.kerberos.enabled,kerberos_user:config.kerberos.user,
     kerberos_realm:config.kerberos.realm,kerberos_kdc:config.kerberos.kdc,
@@ -283,6 +284,7 @@ function Configuration({config, close, saved}) {
       <label><FieldTitle help="Nombre del usuario técnico de Ranger. Solo se utiliza cuando eliges Usuario y contraseña." example="rangeradmin">Usuario</FieldTitle><input value={form.ranger_user} onChange={e=>set('ranger_user',e.target.value)}/></label>
       <label><FieldTitle help="Contraseña de workload de Cloudera utilizada para acceder a Ranger y, cuando corresponda, a Solr. Es el valor de la variable WORKLOAD_PASSWORD. Si todavía no tienes una, ve a User Settings en Cloudera y genera tu Workload Password. Déjala vacía al editar para conservar la ya configurada." example="el valor de WORKLOAD_PASSWORD generado en User Settings">Contraseña</FieldTitle><input type="password" value={form.ranger_password} onChange={e=>set('ranger_password',e.target.value)} placeholder={config.ranger.hasPassword?'Configurada · dejar vacío para conservar':'Introducir WORKLOAD_PASSWORD'}/></label>
       <label><FieldTitle help="Token Bearer aceptado por el endpoint de Ranger o Knox. Solo se utiliza con la autenticación Bearer." example="eyJhbGciOi...">Token Ranger</FieldTitle><input type="password" value={form.ranger_token} onChange={e=>set('ranger_token',e.target.value)} placeholder={config.ranger.hasToken?'Configurado · dejar vacío para conservar':'Bearer token opcional'}/></label>
+      <label className="tls-toggle span-2"><input type="checkbox" checked={form.ranger_verify_ssl} onChange={e=>set('ranger_verify_ssl',e.target.checked)}/><span><strong>Verificar certificado SSL de Ranger</strong><small>{form.ranger_verify_ssl?'Solo se aceptarán certificados emitidos por una CA de confianza.':'Desactivado: se permiten certificados autofirmados.'}</small></span><FieldHelp example="desactivado en entornos internos con una CA no instalada">Actívalo en producción cuando la cadena de certificados del servidor sea de confianza. Si está desactivado, la conexión sigue cifrada pero no se valida la identidad del servidor.</FieldHelp></label>
     </fieldset>
     <fieldset><legend>Fuente de auditoría</legend>
       <label><FieldTitle help="Servicio desde el que se leerán las auditorías. Solr admite tanto conexión directa como publicación mediante Knox cdp-proxy-api." example="Solr vía Knox">Origen</FieldTitle><select value={form.audit_source} onChange={e=>set('audit_source',e.target.value)}><option value="ranger">API Ranger vía Knox</option><option value="solr">Solr directo o vía Knox</option></select></label>
@@ -293,6 +295,7 @@ function Configuration({config, close, saved}) {
       <label><FieldTitle help="Nombre DNS o IP para conexión directa. Solo se usa cuando la URL completa está vacía." example="solr-master.example.internal">Servidor Solr (alternativo)</FieldTitle><input value={form.solr_server} onChange={e=>set('solr_server',e.target.value)}/></label>
       <label><FieldTitle help="Puerto en el que escucha Solr. Debe ser un número entre 1 y 65535." example="8995">Puerto</FieldTitle><input type="number" value={form.solr_port} onChange={e=>set('solr_port',e.target.value)}/></label>
       <label><FieldTitle help="Nombre exacto de la colección de Solr que contiene las auditorías de Apache Ranger." example="ranger_audits">Colección</FieldTitle><input value={form.solr_collection} onChange={e=>set('solr_collection',e.target.value)}/></label>
+      <label className="tls-toggle span-2"><input type="checkbox" checked={form.solr_verify_ssl} onChange={e=>set('solr_verify_ssl',e.target.checked)}/><span><strong>Verificar certificado SSL de Solr / Knox</strong><small>{form.solr_verify_ssl?'Solo se aceptarán certificados emitidos por una CA de confianza.':'Desactivado: se permiten certificados autofirmados.'}</small></span><FieldHelp example="desactivado para cdp-proxy-api con certificado autofirmado">Actívalo cuando la cadena del gateway esté instalada como confiable. Si está desactivado, curl utiliza el equivalente a -k.</FieldHelp></label>
       <p className="secret-state span-2">Endpoint efectivo: <strong>{form.solr_url || `https://${form.solr_server}:${form.solr_port}/solr/${form.solr_collection}/select`}</strong></p>
     </fieldset>
     <fieldset className={`kerberos-settings ${form.kerberos_enabled?'enabled':'disabled'}`}><legend>Kerberos (opcional)</legend>

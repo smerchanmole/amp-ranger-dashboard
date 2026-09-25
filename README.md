@@ -423,6 +423,7 @@ SOLR_URL=https://gateway.example:8443/gateway/cdp-proxy-api/solr/ranger_audits/s
 SOLR_AUTH_TYPE=basic
 SOLR_USER=usuario-tecnico
 SOLR_PASSWORD=
+SOLR_VERIFY_SSL=false
 
 KERBEROS_ENABLED=false
 KERBEROS_USER=
@@ -450,6 +451,12 @@ CLOUDERA_AI_DEFAULT_MODEL=
 SERVER_IP=127.0.0.1
 APP_PORT=8000
 ```
+
+`RANGER_VERIFY_SSL=false` y `SOLR_VERIFY_SSL=false` permiten conectar con
+certificados autofirmados. Los dos valores también pueden cambiarse en el
+formulario **Configuración**. Manténgalos en `true` cuando el certificado esté
+emitido por una CA de confianza; desactivar la verificación cifra el tráfico,
+pero no autentica la identidad del servidor.
 
 No se deben versionar `.env`, `.env.cml`, tokens, contraseñas, keytabs ni
 cachés Kerberos. Ambos ficheros `.env` están incluidos en `.gitignore`.
@@ -860,6 +867,7 @@ en la plataforma Cloudera del entorno objetivo.
 | `requirements.txt not found` | raíz de proyecto incorrecta | usar el `start.py` actualizado |
 | `asyncio.run() cannot be called...` | Uvicorn se inició dentro del loop de IPython | ejecutar mediante el subproceso de `start.py` |
 | `No se llegó a la URL de Ranger` | DNS, red, timeout o SSL | revisar URL y conectividad desde CML |
+| `CERTIFICATE_VERIFY_FAILED` | certificado autofirmado o CA corporativa no instalada | desactivar **Verificar certificado SSL** para ese endpoint o instalar la CA corporativa |
 | HTTP 401 Ranger | usuario o `WORKLOAD_PASSWORD` incorrectos | regenerar la contraseña en User Settings |
 | HTTP 403 Ranger | usuario sin permisos | revisar roles y políticas |
 | HTTP 200 sin JSON | ruta Knox incorrecta, HTML o redirección | comprobar URL `cdp-proxy-token/ranger` |

@@ -62,7 +62,12 @@ class RangerClient:
         except requests.exceptions.InvalidURL as exc:
             raise RangerError(f"No se puede usar la URL de Ranger: la dirección no es válida ({url})") from exc
         except requests.exceptions.SSLError as exc:
-            raise RangerError(f"No se llegó a la URL de Ranger por un error de certificado SSL: {exc}") from exc
+            raise RangerError(
+                "No se llegó a la URL de Ranger por un error de certificado SSL. "
+                "Si el servidor usa un certificado autofirmado, desactiva "
+                "'Verificar certificado SSL' en Configuración > Apache Ranger / Knox. "
+                f"Detalle: {exc}"
+            ) from exc
         except requests.exceptions.Timeout as exc:
             raise RangerError(
                 f"No se llegó a la URL de Ranger: la conexión agotó el tiempo de espera "

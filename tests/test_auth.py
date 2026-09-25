@@ -62,3 +62,14 @@ def test_cloudera_remote_user_has_priority_over_local_login():
         "source": "cloudera",
     }
     assert client.get("/api/config").status_code == 200
+
+
+def test_public_config_exposes_tls_verification_controls(monkeypatch):
+    monkeypatch.setattr(app_settings, "ranger_verify_ssl", False)
+    monkeypatch.setattr(app_settings, "solr_verify_ssl", True)
+    client = TestClient(app, headers={"REMOTE-USER": "cml-admin"})
+
+    config = client.get("/api/config").json()
+
+    assert config["ranger"]["verifySsl"] is False
+    assert config["audit"]["verifySsl"] is True
